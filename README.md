@@ -169,9 +169,16 @@ sudo systemctl status arena
 # View logs
 sudo journalctl -u arena -f
 ```
+### Useful commands
+ 
+```bash
+sudo systemctl restart arena      # Restart after config changes
+sudo systemctl stop arena         # Stop the server
+sudo journalctl -u arena --since "1 hour ago"  # Recent logs
+```
 
 ## (Optional) Port forwarding (browser can access through port 80)
-```
+```bash
 sudo sh -c 'echo "iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080" >> /etc/rc.local'
 sudo chmod +x /etc/rc.local
 ```
