@@ -1,0 +1,30 @@
+[Unit]
+Description=Fairness Arena — CLIP Retrieval Fairness Evaluation
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/fairness_arena
+Environment=PYTHONUNBUFFERED=1
+
+# ── EDIT THESE ──────────────────────────────────────────────
+# Generate a token: python3 -c "import secrets; print(secrets.token_hex(32))"
+Environment=ADMIN_TOKEN=changeme
+Environment=BUNDLE_PATH=data/arena_bundle.npz
+Environment=PORT=8080
+# ────────────────────────────────────────────────────────────
+
+ExecStart=/home/ubuntu/fairness_arena/venv/bin/python server.py \
+    --bundle ${BUNDLE_PATH} \
+    --admin-token ${ADMIN_TOKEN} \
+    --port ${PORT}
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
