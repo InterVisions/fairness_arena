@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fairness Arena — Admin</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #111827; --bg-card: #1f2937; --text: #f3f4f6; --text-dim: #9ca3af;
+    --accent: #6366f1; --border: #374151; --green: #34d399; --red: #f87171;
+    --font: 'IBM Plex Sans', sans-serif; --mono: 'IBM Plex Mono', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; padding: 24px; }
+
+  h1 { font-size: 1.5rem; margin-bottom: 24px; }
+  h2 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 24px; }
+
+  .card {
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid var(--border);
+  }
+
+  .stat-big { font-size: 2rem; font-weight: 700; font-family: var(--mono); }
+  .stat-label { font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; }
+
+  .auth-section { margin-bottom: 24px; }
+  .auth-section input {
+    padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg-card); color: var(--text); font-family: var(--mono);
+    font-size: 0.85rem; width: 250px;
+  }
+  .auth-section button {
+    padding: 8px 16px; border-radius: 6px; border: none;
+    background: var(--accent); color: white; cursor: pointer;
+    font-family: var(--font); font-weight: 600; font-size: 0.85rem;
+    margin-left: 8px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { text-align: left; padding: 8px; border-bottom: 2px solid var(--border); color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; }
+  td { padding: 8px; border-bottom: 1px solid var(--border); }
+
+  .bar-container { height: 14px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; }
+  .bar { height: 100%; border-radius: 4px; transition: width 0.5s; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+  .actions button {
+    padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border);
+    background: transparent; color: var(--text); cursor: pointer;
+    font-family: var(--font); font-size: 0.8rem;
+  }
+  .actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .actions button.danger:hover { border-color: var(--red); color: var(--red); }
+
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag-item {
+    padding: 4px 10px; border-radius: 12px; font-size: 0.72rem;
+    background: rgba(99,102,241,0.15); color: #a5b4fc; font-family: var(--mono);
+  }
+
+  #status { font-family: var(--mono); font-size: 0.75rem; color: var(--green); margin-bottom: 16px; }
+  #status.error { color: var(--red); }
+</style>
+</head>
+<body>
+
+<h1>⚙️ Fairness Arena — Admin Dashboard</h1>
+
+<div class="auth-section">
+  <input id="token-input" type="password" placeholder="Admin token">
+  <button onclick="authenticate()">Connect</button>
+  <span id="status"></span>
+</div>
+
+<div id="dashboard" style="display:none">
+
+  <!-- Quick stats -->
+  <div class="grid" id="stats-grid">
+    <div class="card">
+      <div class="stat-big" id="stat-votes">—</div>
+      <div class="stat-label">Total votes</div>
+    </div>
+    <div class="card">
+      <div class="stat-big" id="stat-participants">—</div>
+      <div class="stat-label">Unique participants</div>
+    </div>
+    <div class="card">
+      <div class="stat-big" id="stat-queries">—</div>
+      <div class="stat-label">Unique queries used</div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button onclick="refreshStats()">🔄 Refresh</button>
+    <button onclick="exportCSV()">📥 Export votes CSV</button>
+    <button onclick="precompute()">⚡ Pre-compute all retrievals</button>
+    <button class="danger" onclick="resetElo()">🗑️ Reset Elo ratings</button>
+  </div>
+
+  <!-- Elo leaderboard -->
+  <div class="card" style="margin-bottom:16px">
+    <h2>Model Elo Ratings</h2>
+    <table>
+      <thead><tr><th>Rank</th><th>Model</th><th>Elo</th><th>W/L/T</th><th></th></tr></thead>
+      <tbody id="elo-table"></tbody>
+    </table>
+  </div>
+
+  <div class="grid">
+    <!-- Position bias -->
+    <div class="card">
+      <h2>Position Bias Check</h2>
+      <table>
+        <thead><tr><th>Position of A</th><th>A wins</th><th>B wins</th><th>Ties</th></tr></thead>
+        <tbody id="position-table"></tbody>
+      </table>
+    </div>
+
+    <!-- Why tags -->
+    <div class="card">
+      <h2>Why Tags (frequency)</h2>
+      <div class="tag-cloud" id="tag-cloud"></div>
+    </div>
+
+    <!-- Winner distribution -->
+    <div class="card">
+      <h2>Winner Distribution</h2>
+      <div id="winner-dist"></div>
+    </div>
+
+    <!-- Top queries -->
+    <div class="card">
+      <h2>Votes per Query</h2>
+      <table>
+        <thead><tr><th>Query</th><th>Votes</th></tr></thead>
+        <tbody id="query-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let TOKEN = '';
+
+function authenticate() {
+  TOKEN = document.getElementById('token-input').value;
+  refreshStats();
+}
+
+async function adminFetch(url, opts = {}) {
+  const headers = {'X-Admin-Token': TOKEN, ...(opts.headers || {})};
+  const resp = await fetch(url, {...opts, headers});
+  if (resp.status === 403) {
+    document.getElementById('status').textContent = 'Invalid token';
+    document.getElementById('status').className = 'error';
+    return null;
+  }
+  document.getElementById('status').textContent = 'Connected';
+  document.getElementById('status').className = '';
+  document.getElementById('dashboard').style.display = 'block';
+  return resp.json();
+}
+
+async function refreshStats() {
+  const data = await adminFetch('/api/admin/stats');
+  if (!data) return;
+
+  const s = data.stats;
+  document.getElementById('stat-votes').textContent = s.total_votes;
+  document.getElementById('stat-participants').textContent = s.unique_participants;
+  document.getElementById('stat-queries').textContent = s.votes_per_query.length;
+
+  // Elo table
+  const eloBody = document.getElementById('elo-table');
+  eloBody.innerHTML = '';
+  const maxRating = Math.max(...data.ratings.map(r => r.rating), 1600);
+  data.ratings.forEach((r, i) => {
+    const pct = ((r.rating - 1400) / (maxRating - 1400)) * 100;
+    eloBody.innerHTML += `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${r.display_name || r.model_id}</td>
+        <td style="font-family:var(--mono);font-weight:600">${Math.round(r.rating)}</td>
+        <td style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim)">${r.wins}/${r.losses}/${r.ties}</td>
+        <td style="width:40%"><div class="bar-container"><div class="bar" style="width:${Math.max(pct,2)}%;background:var(--accent)"></div></div></td>
+      </tr>`;
+  });
+
+  // Position bias
+  const posBody = document.getElementById('position-table');
+  posBody.innerHTML = '';
+  s.position_bias.forEach(p => {
+    posBody.innerHTML += `
+      <tr><td>${p.position_a}</td><td>${p.a_wins}</td><td>${p.b_wins}</td><td>${p.ties}</td></tr>`;
+  });
+
+  // Why tags
+  const tagCloud = document.getElementById('tag-cloud');
+  tagCloud.innerHTML = '';
+  Object.entries(s.why_tag_counts).sort((a,b) => b[1]-a[1]).forEach(([tag, count]) => {
+    tagCloud.innerHTML += `<span class="tag-item">${tag} (${count})</span>`;
+  });
+
+  // Winner dist
+  const wd = document.getElementById('winner-dist');
+  const total = Object.values(s.winner_distribution).reduce((a,b) => a+b, 0) || 1;
+  wd.innerHTML = '';
+  for (const [w, c] of Object.entries(s.winner_distribution)) {
+    const pct = (c / total * 100).toFixed(1);
+    wd.innerHTML += `
+      <div style="margin-bottom:6px;font-size:0.8rem">
+        <span style="font-family:var(--mono)">${w}: ${c}</span>
+        <span style="color:var(--text-dim)"> (${pct}%)</span>
+        <div class="bar-container" style="margin-top:2px"><div class="bar" style="width:${pct}%;background:${w==='tie'?'#fbbf24':w==='A'?'#60a5fa':'#f472b6'}"></div></div>
+      </div>`;
+  }
+
+  // Queries
+  const qBody = document.getElementById('query-table');
+  qBody.innerHTML = '';
+  s.votes_per_query.slice(0, 15).forEach(q => {
+    qBody.innerHTML += `<tr><td>${q.query}</td><td style="font-family:var(--mono)">${q.count}</td></tr>`;
+  });
+}
+
+async function exportCSV() {
+  window.open(`/api/admin/export_csv?token=${TOKEN}`);
+}
+
+async function resetElo() {
+  if (!confirm('Reset ALL Elo ratings? This cannot be undone.')) return;
+  await adminFetch('/api/admin/reset_elo', {method: 'POST'});
+  refreshStats();
+}
+
+async function precompute() {
+  const data = await adminFetch('/api/admin/precompute', {method: 'POST'});
+  if (data) alert(`Pre-computed ${data.newly_computed} new (model, query) pairs`);
+}
+
+// Auto-refresh every 10s
+setInterval(() => { if (TOKEN) refreshStats(); }, 10000);
+</script>
+</body>
+</html>

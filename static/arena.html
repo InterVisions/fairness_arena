@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InterVisions Fairness Arena</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #fafafa;
+    --bg-card: #ffffff;
+    --text: #1a1a2e;
+    --text-dim: #6b7280;
+    --accent: #4f46e5;
+    --accent-light: #e0e7ff;
+    --border: #e5e7eb;
+    --green: #059669;
+    --red: #dc2626;
+    --font: 'IBM Plex Sans', sans-serif;
+    --mono: 'IBM Plex Mono', monospace;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.1);
+    --radius: 10px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Header ──────────────────────────────────────── */
+  .header {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: var(--shadow);
+  }
+
+  .header h1 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .header-links { display: flex; gap: 16px; align-items: center; }
+  .header-links a {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-decoration: none;
+  }
+  .header-links a:hover { color: var(--accent); }
+
+  .participant-badge {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    padding: 4px 10px;
+    background: var(--accent-light);
+    color: var(--accent);
+    border-radius: 20px;
+  }
+
+  /* ── Main container ──────────────────────────────── */
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+  /* ── Query selector ──────────────────────────────── */
+  .query-section {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+  }
+
+  .query-section label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .query-row { display: flex; gap: 10px; }
+
+  #query-select {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 0.9rem;
+  }
+
+  #query-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 0.9rem;
+    display: none;
+  }
+
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover { background: #4338ca; }
+
+  .btn-outline {
+    background: transparent;
+    border: 2px solid var(--border);
+    color: var(--text);
+  }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Judge question ──────────────────────────────── */
+  .judge-question {
+    text-align: center;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--accent-light);
+    border-radius: 8px;
+  }
+
+  /* ── Comparison grid ─────────────────────────────── */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0;
+    margin-bottom: 20px;
+    align-items: stretch;
+  }
+
+  .comparison-divider {
+    width: 2px;
+    background: black;
+    margin: 0 32px;
+  }
+
+  .model-panel {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    border: 3px solid transparent;
+    transition: border-color 0.2s;
+    cursor: pointer;
+  }
+
+  .model-panel:hover { border-color: var(--accent); }
+  .model-panel.selected { border-color: var(--accent); box-shadow: var(--shadow-lg); }
+
+  .model-header {
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .model-label {
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-family: var(--mono);
+  }
+
+  .label-a { background: #dbeafe; color: #1d4ed8; }
+  .label-b { background: #fce7f3; color: #be185d; }
+
+  .image-grid {
+    display: grid;
+    gap: 2px;
+    padding: 2px;
+    max-height: 480px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0,0,0,0.15) transparent;
+  }
+
+  .image-grid::-webkit-scrollbar { width: 6px; }
+  .image-grid::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+  .image-grid::-webkit-scrollbar-track { background: transparent; }
+
+  .image-grid img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    display: block;
+    background: #f3f4f6;
+  }
+
+  /* ── Voting panel ────────────────────────────────── */
+  .vote-panel {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    text-align: center;
+  }
+
+  .vote-buttons { display: flex; gap: 12px; justify-content: center; margin-bottom: 16px; }
+
+  .vote-btn {
+    padding: 12px 32px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: white;
+    transition: all 0.15s;
+  }
+
+  .vote-btn:hover { border-color: var(--accent); }
+  .vote-btn.selected { background: var(--accent); color: white; border-color: var(--accent); }
+
+  /* ── Why tags ────────────────────────────────────── */
+  .why-section {
+    margin-top: 16px;
+    display: none;
+  }
+
+  .why-section.visible { display: block; }
+
+  .why-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 12px; }
+
+  .why-tag {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+
+  .why-tag.selected { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+
+  .why-freetext {
+    width: 100%;
+    max-width: 500px;
+    margin: 8px auto;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 0.82rem;
+    resize: none;
+  }
+
+  /* ── Stats bar ───────────────────────────────────── */
+  .stats-bar {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 12px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  /* ── Registration modal ──────────────────────────── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+
+  .modal-overlay.hidden { display: none; }
+
+  .modal {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 32px;
+    max-width: 420px;
+    width: 90%;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+    text-align: center;
+  }
+
+  .modal h2 { font-size: 1.3rem; margin-bottom: 8px; }
+  .modal p { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 20px; }
+
+  .modal input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font);
+    font-size: 0.9rem;
+    margin-bottom: 16px;
+  }
+
+  /* ── Loading state ───────────────────────────────── */
+  .loading { opacity: 0.5; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<!-- Registration modal -->
+<div class="modal-overlay" id="reg-modal">
+  <div class="modal">
+    <h2>Welcome to InterVisions Fairness Arena</h2>
+    <p>Help us evaluate how fairly AI models represent people.
+       Compare image search results and vote for the fairer one.</p>
+    <input type="text" id="nickname-input" placeholder="Enter a nickname (optional)">
+    <br>
+    <button class="btn btn-primary" onclick="register()" style="width:100%">Start</button>
+  </div>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <h1>⚖️ InterVisions Fairness Arena</h1>
+  <div class="header-links">
+    <span class="participant-badge" id="pid-badge" style="display:none"></span>
+    <span class="stats-bar" id="vote-count-display"></span>
+    <a href="/leaderboard">Leaderboard</a>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="container">
+
+  <!-- Query selector -->
+  <div class="query-section">
+    <label>Search query — what would a municipal communication team search for?</label>
+    <div class="query-row">
+      <select id="query-select"><option value="">Select a query…</option></select>
+      <input id="query-input" type="text" placeholder="Type a custom query…">
+      <button class="btn btn-primary" onclick="startMatch()">Search</button>
+      <button class="btn btn-outline" onclick="randomQuery()">Random</button>
+    </div>
+  </div>
+
+  <!-- Judge question -->
+  <div class="judge-question" id="judge-question" style="display:none"></div>
+
+  <!-- Side-by-side comparison -->
+  <div class="comparison" id="comparison" style="display:none">
+    <div class="model-panel" id="panel-left" onclick="selectPanel('left')">
+      <div class="model-header">
+        <span>Left results</span>
+        <span class="model-label label-a" id="label-left"></span>
+      </div>
+      <div class="image-grid" id="grid-left"></div>
+    </div>
+    <div class="comparison-divider"></div>
+    <div class="model-panel" id="panel-right" onclick="selectPanel('right')">
+      <div class="model-header">
+        <span>Right results</span>
+        <span class="model-label label-b" id="label-right"></span>
+      </div>
+      <div class="image-grid" id="grid-right"></div>
+    </div>
+  </div>
+
+  <!-- Voting -->
+  <div class="vote-panel" id="vote-panel" style="display:none">
+    <div class="vote-buttons">
+      <button class="vote-btn" data-vote="left" onclick="selectVote('left')">👈 Left is fairer</button>
+      <button class="vote-btn" data-vote="tie" onclick="selectVote('tie')">🤝 Tie</button>
+      <button class="vote-btn" data-vote="right" onclick="selectVote('right')">Right is fairer 👉</button>
+    </div>
+
+    <div class="why-section" id="why-section">
+      <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:8px">
+        Why? (optional — select any that apply)
+      </p>
+      <div class="why-tags" id="why-tags"></div>
+      <textarea class="why-freetext" id="why-freetext" rows="2"
+                placeholder="Any other thoughts? (optional)"></textarea>
+      <br><br>
+      <button class="btn btn-primary" onclick="submitVote()">Submit vote</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════════════════════
+const S = {
+  pid: localStorage.getItem('fairness_arena_pid') || '',
+  config: {},
+  currentMatch: null,
+  selectedVote: null,
+  selectedTags: new Set(),
+  totalVotes: 0,
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════════════════════════════════
+async function init() {
+  // Load config
+  const resp = await fetch('/api/config');
+  S.config = await resp.json();
+
+  // Populate query dropdown
+  const sel = document.getElementById('query-select');
+  for (const q of S.config.predefined_queries) {
+    const opt = document.createElement('option');
+    opt.value = q;
+    opt.textContent = q;
+    sel.appendChild(opt);
+  }
+
+  // Show/hide custom input
+  if (S.config.allow_open_queries) {
+    document.getElementById('query-input').style.display = 'block';
+  }
+
+  // Set grid columns
+  document.querySelectorAll('.image-grid').forEach(g => {
+    g.style.gridTemplateColumns = `repeat(${S.config.grid_columns}, 1fr)`;
+  });
+
+  // Check registration
+  if (S.pid) {
+    document.getElementById('reg-modal').classList.add('hidden');
+    document.getElementById('pid-badge').textContent = `ID: ${S.pid}`;
+    document.getElementById('pid-badge').style.display = 'inline';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Registration
+// ═══════════════════════════════════════════════════════════════════════
+async function register() {
+  const nickname = document.getElementById('nickname-input').value.trim();
+  const resp = await fetch('/api/register', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({nickname}),
+  });
+  const data = await resp.json();
+  S.pid = data.participant_id;
+  localStorage.setItem('fairness_arena_pid', S.pid);
+  document.getElementById('reg-modal').classList.add('hidden');
+  document.getElementById('pid-badge').textContent = `ID: ${S.pid}`;
+  document.getElementById('pid-badge').style.display = 'inline';
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Match
+// ═══════════════════════════════════════════════════════════════════════
+function randomQuery() {
+  const queries = S.config.predefined_queries;
+  const q = queries[Math.floor(Math.random() * queries.length)];
+  document.getElementById('query-select').value = q;
+  startMatch();
+}
+
+async function startMatch() {
+  const sel = document.getElementById('query-select');
+  const inp = document.getElementById('query-input');
+  const query = inp.value.trim() || sel.value;
+  if (!query) return;
+
+  // Reset state
+  S.selectedVote = null;
+  S.selectedTags.clear();
+  document.querySelectorAll('.vote-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelectorAll('.model-panel').forEach(p => p.classList.remove('selected'));
+  document.getElementById('why-section').classList.remove('visible');
+
+  // Show loading
+  document.getElementById('comparison').style.display = 'grid';
+  document.getElementById('comparison').classList.add('loading');
+  document.getElementById('vote-panel').style.display = 'none';
+
+  const resp = await fetch(`/api/match?query=${encodeURIComponent(query)}&participant_id=${S.pid}`);
+  const match = await resp.json();
+  S.currentMatch = match;
+
+  // Set labels
+  document.getElementById('label-left').textContent = match.left.label;
+  document.getElementById('label-right').textContent = match.right.label;
+  document.getElementById('label-left').className = 'model-label ' +
+    (match.left.label === 'Model A' ? 'label-a' : 'label-b');
+  document.getElementById('label-right').className = 'model-label ' +
+    (match.right.label === 'Model A' ? 'label-a' : 'label-b');
+
+  // Load images
+  loadGrid('grid-left', match.left.indices);
+  loadGrid('grid-right', match.right.indices);
+
+  // Show judge question
+  const jq = document.getElementById('judge-question');
+  jq.textContent = S.config.judge_question;
+  jq.style.display = 'block';
+
+  // Show vote panel
+  document.getElementById('vote-panel').style.display = 'block';
+  document.getElementById('comparison').classList.remove('loading');
+
+  // Build why tags
+  if (S.config.enable_why_tags) {
+    const container = document.getElementById('why-tags');
+    container.innerHTML = '';
+    for (const tag of S.config.why_tags) {
+      const el = document.createElement('span');
+      el.className = 'why-tag';
+      el.textContent = tag;
+      el.onclick = () => {
+        el.classList.toggle('selected');
+        if (S.selectedTags.has(tag)) S.selectedTags.delete(tag);
+        else S.selectedTags.add(tag);
+      };
+      container.appendChild(el);
+    }
+  }
+}
+
+function loadGrid(gridId, indices) {
+  const grid = document.getElementById(gridId);
+  grid.innerHTML = '';
+  for (const idx of indices) {
+    const img = document.createElement('img');
+    img.src = `/api/image/${idx}`;
+    img.loading = 'lazy';
+    img.alt = `Image ${idx}`;
+    grid.appendChild(img);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Voting
+// ═══════════════════════════════════════════════════════════════════════
+function selectPanel(side) {
+  // Clicking a panel = voting for whichever model is on that side
+  // We store the vote as 'left' or 'right' internally, and resolve
+  // to model_a / model_b only at submit time. This avoids all the
+  // confusing A/B ↔ left/right mapping bugs.
+  selectVote(side);
+}
+
+function selectVote(choice) {
+  // choice is 'left', 'right', or 'tie' (from buttons)
+  S.selectedVote = choice;
+
+  // Highlight the correct button
+  document.querySelectorAll('.vote-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.vote === choice);
+  });
+
+  // Highlight the correct panel
+  document.querySelectorAll('.model-panel').forEach(p => p.classList.remove('selected'));
+  if (choice === 'left') {
+    document.getElementById('panel-left').classList.add('selected');
+  } else if (choice === 'right') {
+    document.getElementById('panel-right').classList.add('selected');
+  }
+
+  // Show why section
+  document.getElementById('why-section').classList.add('visible');
+}
+
+async function submitVote() {
+  if (!S.selectedVote || !S.currentMatch) return;
+
+  const m = S.currentMatch;
+
+  // Resolve left/right/tie → A/B/tie for the backend
+  let winner;
+  if (S.selectedVote === 'tie') {
+    winner = 'tie';
+  } else if (S.selectedVote === 'left') {
+    // Who is on the left? Check position_a
+    winner = m.position_a === 'left' ? 'A' : 'B';
+  } else {
+    // selectedVote === 'right'
+    winner = m.position_a === 'right' ? 'A' : 'B';
+  }
+
+  // Resolve which indices belong to A and B
+  const images_a = m.position_a === 'left' ? m.left.indices : m.right.indices;
+  const images_b = m.position_a === 'left' ? m.right.indices : m.left.indices;
+
+  const vote = {
+    participant_id: S.pid,
+    query: m.query,
+    model_a: m.model_a,
+    model_b: m.model_b,
+    winner: winner,
+    position_a: m.position_a,
+    why_tags: [...S.selectedTags],
+    why_freetext: document.getElementById('why-freetext').value.trim(),
+    images_a: images_a,
+    images_b: images_b,
+  };
+
+  await fetch('/api/vote', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(vote),
+  });
+
+  S.totalVotes++;
+  document.getElementById('vote-count-display').textContent = `${S.totalVotes} votes this session`;
+  document.getElementById('why-freetext').value = '';
+
+  // Auto-load next match with a random query
+  randomQuery();
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
