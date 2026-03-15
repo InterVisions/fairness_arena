@@ -138,6 +138,7 @@ fairness-arena/
 ├── database.py            # SQLite + Elo logic
 ├── retrieval.py           # CLIP model loading + retrieval + bundle loading
 ├── requirements.txt
+├── arena.service
 ├── config/
 │   └── default_config.json
 ├── data/
@@ -147,4 +148,30 @@ fairness-arena/
     ├── arena.html          # Public voting interface
     ├── admin.html          # Admin dashboard
     └── leaderboard.html    # Public leaderboard
+```
+
+## (Optional) Configure the systemd service
+
+```bash
+# Edit the service file to set your SECRET_KEY
+vi arena.service
+# Change ADMIN_TOKEN to a random string (generate one with: python3 -c "import secrets; print(secrets.token_hex(32))")
+
+# Install the service
+sudo cp arena.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable arena
+sudo systemctl start arena
+
+# Check it's running
+sudo systemctl status arena
+
+# View logs
+sudo journalctl -u arena -f
+```
+
+## (Optional) Port forwarding (browser can access through port 80)
+```
+sudo sh -c 'echo "iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080" >> /etc/rc.local'
+sudo chmod +x /etc/rc.local
 ```
