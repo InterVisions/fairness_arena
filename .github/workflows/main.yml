@@ -1,0 +1,19 @@
+name: Add issues to project
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    permissions:
+      repository-projects: write
+      issues: read
+
+    steps:
+      - name: Add to project
+        uses: actions/add-to-project@v1
+        with:
+          project-url: https://github.com/orgs/InterVisions/projects/2
+          github-token: ${{ secrets.GITHUB_TOKEN }}
