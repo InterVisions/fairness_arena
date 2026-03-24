@@ -7,6 +7,8 @@ An LMSYS-style arena for comparing fairness of CLIP retrieval models.
 Usage:
     python server.py
     python server.py --config config/my_config.json --port 8080
+    python server.py --bundles-dir data/
+    python server.py --bundle data/arena_bundle_flickr30k.npz  (legacy single-bundle)
 """
 
 import argparse
@@ -32,11 +34,55 @@ log = logging.getLogger("fairness-arena")
 CONFIG = {}
 ENGINE = None  # RetrievalEngine instance
 ADMIN_TOKEN = "changeme"  # Set via --admin-token
+BUNDLE_PATH = None        # Explicit single-bundle path (legacy)
+BUNDLES_DIR = None        # Directory containing per-dataset bundles
 
 app = FastAPI(title="Fairness Arena")
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def get_datasets(config: dict) -> list[dict]:
+    """Return datasets list, handling both old single-dataset and new multi-dataset configs."""
+    if "datasets" in config:
+        return config["datasets"]
+    ds = config.get("dataset", {})
+    if not ds:
+        return []
+    if "id" not in ds:
+        if ds.get("source") == "huggingface":
+            ds = dict(ds, id=ds["hf_repo"].split("/")[-1].lower())
+        else:
+            ds = dict(ds, id=Path(ds.get("folder_path", "dataset")).stem.lower())
+    if "name" not in ds:
+        ds = dict(ds, name=ds["id"])
+    return [ds]
+
+
+def bundle_path_for(dataset_id: str) -> Path | None:
+    """Resolve the bundle file path for a given dataset id."""
+    if BUNDLES_DIR:
+        p = Path(BUNDLES_DIR) / f"arena_bundle_{dataset_id}.npz"
+        return p if p.exists() else None
+    return None
+
+
+def active_bundle_path() -> Path | None:
+    """Return the bundle path for the currently active dataset."""
+    if BUNDLE_PATH:
+        return Path(BUNDLE_PATH)
+    active_id = CONFIG.get("arena", {}).get("active_dataset_id")
+    if active_id:
+        return bundle_path_for(active_id)
+    # Fall back to first dataset with an available bundle
+    for ds in get_datasets(CONFIG):
+        p = bundle_path_for(ds["id"])
+        if p:
+            return p
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -279,6 +325,100 @@ async def api_admin_precompute(request: Request):
     return {"status": "ok", "newly_computed": count, "total_pairs": len(models) * len(queries)}
 
 
+# ── Dataset management ────────────────────────────────────────────────────
+
+@app.get("/api/admin/datasets")
+async def api_admin_datasets(request: Request):
+    """List all configured datasets and their bundle availability."""
+    check_admin(request)
+    datasets = get_datasets(CONFIG)
+    active_id = CONFIG.get("arena", {}).get("active_dataset_id")
+    is_bundle_mode = bool(BUNDLE_PATH or BUNDLES_DIR)
+
+    result = []
+    for ds in datasets:
+        ds_id = ds["id"]
+        bundle = bundle_path_for(ds_id)
+        # Also check legacy single-bundle path
+        if not bundle and BUNDLE_PATH and active_id == ds_id:
+            bundle = Path(BUNDLE_PATH) if Path(BUNDLE_PATH).exists() else None
+        result.append({
+            "id": ds_id,
+            "name": ds.get("name", ds_id),
+            "source": ds.get("source", "huggingface"),
+            "hf_repo": ds.get("hf_repo"),
+            "folder_path": ds.get("folder_path"),
+            "max_images": ds.get("max_images"),
+            "bundle_available": bundle is not None,
+            "bundle_path": str(bundle) if bundle else None,
+            "active": ds_id == active_id,
+        })
+
+    return {
+        "datasets": result,
+        "active_dataset_id": active_id,
+        "bundle_mode": is_bundle_mode,
+    }
+
+
+@app.post("/api/admin/datasets/switch")
+async def api_admin_switch_dataset(request: Request):
+    """Switch the active dataset by loading its pre-computed bundle."""
+    global CONFIG
+    check_admin(request)
+
+    body = await request.json()
+    dataset_id = body.get("dataset_id")
+    if not dataset_id:
+        raise HTTPException(400, "dataset_id is required")
+
+    # Verify the dataset exists in config
+    datasets = get_datasets(CONFIG)
+    ds_cfg = next((d for d in datasets if d["id"] == dataset_id), None)
+    if ds_cfg is None:
+        raise HTTPException(404, f"Dataset '{dataset_id}' not found in config")
+
+    # Require bundle mode for switching
+    if not BUNDLES_DIR and not BUNDLE_PATH:
+        raise HTTPException(400,
+            "Dataset switching is only available in bundle mode. "
+            "Start the server with --bundles-dir data/")
+
+    # Find the bundle
+    bundle = bundle_path_for(dataset_id)
+    if not bundle:
+        raise HTTPException(404,
+            f"No bundle found for dataset '{dataset_id}'. "
+            f"Run: python precompute.py --dataset-id {dataset_id}")
+
+    log.info(f"Switching dataset to '{dataset_id}' (bundle: {bundle})")
+
+    # Reload engine with new bundle
+    bundle_config = ENGINE.load_bundle(str(bundle))
+
+    # Update active dataset id in config
+    CONFIG.setdefault("arena", {})["active_dataset_id"] = dataset_id
+
+    # Save updated config
+    config_path = Path(__file__).parent / "config" / "active_config.json"
+    with open(config_path, "w") as f:
+        json.dump(CONFIG, f, indent=2)
+
+    # Ensure Elo entries exist for loaded models
+    initial = CONFIG["arena"].get("elo_initial_rating", 1500)
+    await db.ensure_model_ratings(ENGINE.loaded_models(), initial)
+
+    log.info(f"Dataset switched to '{dataset_id}': "
+             f"{ENGINE.dataset_size()} images, {ENGINE.loaded_models()} models")
+
+    return {
+        "status": "ok",
+        "active_dataset_id": dataset_id,
+        "n_images": ENGINE.dataset_size(),
+        "models": ENGINE.loaded_models(),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Startup
 # ═══════════════════════════════════════════════════════════════════════════
@@ -294,20 +434,32 @@ async def startup():
     # Init database
     await db.init_db()
 
-    if BUNDLE_PATH:
+    bundle = active_bundle_path()
+
+    if bundle:
         # ── Bundle mode: load pre-computed data, no GPU needed ───────
-        bundle_config = ENGINE.load_bundle(BUNDLE_PATH)
+        log.info(f"Bundle mode: loading {bundle}")
+        bundle_config = ENGINE.load_bundle(str(bundle))
         # Merge bundle config with any overrides from active_config
-        for key in ["arena", "models", "dataset"]:
+        for key in ["arena", "models", "datasets", "dataset"]:
             if key not in CONFIG or CONFIG[key] == bundle_config.get(key):
                 CONFIG[key] = bundle_config.get(key, CONFIG.get(key))
     else:
         # ── Live mode: load models and dataset, needs GPU ────────────
         ENGINE.load_models(CONFIG.get("models", []))
 
-        ds_cfg = CONFIG.get("dataset", {})
-        source = ds_cfg.get("source", "huggingface")
+        # Resolve the active dataset config
+        datasets = get_datasets(CONFIG)
+        active_id = CONFIG.get("arena", {}).get("active_dataset_id")
+        if active_id:
+            ds_cfg = next((d for d in datasets if d["id"] == active_id), None)
+        else:
+            ds_cfg = datasets[0] if datasets else None
 
+        if ds_cfg is None:
+            raise RuntimeError("No dataset configured")
+
+        source = ds_cfg.get("source", "huggingface")
         if source == "huggingface":
             ENGINE.load_dataset_from_huggingface(
                 repo=ds_cfg["hf_repo"],
@@ -328,9 +480,10 @@ async def startup():
     initial = CONFIG["arena"].get("elo_initial_rating", 1500)
     await db.ensure_model_ratings(model_ids, initial)
 
-    mode = "bundle" if BUNDLE_PATH else "live"
+    mode = "bundle" if bundle else "live"
     log.info("=" * 60)
     log.info(f"  Fairness Arena ready! (mode: {mode})")
+    log.info(f"  Active dataset: {CONFIG.get('arena', {}).get('active_dataset_id', 'unknown')}")
     log.info(f"  Models: {ENGINE.loaded_models()}")
     log.info(f"  Dataset: {ENGINE.dataset_size()} images")
     log.info(f"  Queries: {len(CONFIG['arena'].get('predefined_queries', []))}")
@@ -341,14 +494,15 @@ async def startup():
 #  Main
 # ═══════════════════════════════════════════════════════════════════════════
 
-BUNDLE_PATH = None
-
 def parse_args():
     p = argparse.ArgumentParser(description="Fairness Arena")
     p.add_argument("--config", default="config/default_config.json")
     p.add_argument("--bundle", default=None,
-                   help="Path to pre-computed bundle (.npz) from precompute.py. "
-                        "If provided, no GPU or model loading is needed.")
+                   help="Path to a single pre-computed bundle (.npz). "
+                        "Legacy option — prefer --bundles-dir for multi-dataset support.")
+    p.add_argument("--bundles-dir", default=None,
+                   help="Directory containing per-dataset bundles "
+                        "(arena_bundle_{dataset_id}.npz). Enables dataset switching.")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--device", default="auto")
@@ -358,11 +512,12 @@ def parse_args():
 
 
 def main():
-    global CONFIG, ENGINE, ADMIN_TOKEN, BUNDLE_PATH
+    global CONFIG, ENGINE, ADMIN_TOKEN, BUNDLE_PATH, BUNDLES_DIR
 
     args = parse_args()
     ADMIN_TOKEN = args.admin_token
     BUNDLE_PATH = args.bundle
+    BUNDLES_DIR = args.bundles_dir
 
     # Load config
     active_config = Path(__file__).parent / "config" / "active_config.json"

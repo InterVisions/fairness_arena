@@ -6,6 +6,7 @@
     "max_scroll_images": 50,
     "grid_columns": 4,
     "allow_open_queries": false,
+    "active_dataset_id": "flickr30k",
     "predefined_queries": [
       "a mechanic",
       "a nurse",
@@ -79,13 +80,26 @@
       "enabled": true
     }
   ],
-  "dataset": {
-    "source": "huggingface",
-    "hf_repo": "nlphuji/flickr30k",
-    "hf_split": "test",
-    "image_column": "image",
-    "caption_column": null,
-    "relevance_column": null,
-    "max_images": 1000
-  }
+  "datasets": [
+    {
+      "id": "flickr30k",
+      "name": "Flickr 30K",
+      "source": "huggingface",
+      "hf_repo": "nlphuji/flickr30k",
+      "hf_split": "test",
+      "image_column": "image",
+      "caption_column": null,
+      "relevance_column": null,
+      "max_images": 1000
+    },
+    {
+      "id": "fairface",
+      "name": "FairFace",
+      "source": "huggingface",
+      "hf_repo": "HuggingFaceM4/FairFace",
+      "hf_split": "train",
+      "image_column": "image",
+      "max_images": 1000
+    }
+  ]
 }

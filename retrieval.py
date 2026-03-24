@@ -221,15 +221,33 @@ class RetrievalEngine:
             return self._bundle_model_ids
         return list(self.models.keys())
 
-    # ── Bundle loading (no GPU needed) ───────────────────────────────
+    # ── Reset ────────────────────────────────────────────────────────────
+
+    def reset(self):
+        """Clear all loaded data so a new bundle can be loaded."""
+        self.models = {}
+        self.dataset = None
+        self.image_embeddings = {}
+        self.image_paths = []
+        self.dataset_loaded = False
+        self.thumbnails = []
+        self._bundle_model_ids = []
+        self._bundle_queries = []
+        if hasattr(self, '_bundle_retrievals'):
+            del self._bundle_retrievals
+
+    # ── Bundle loading (no GPU needed) ───────────────────────────────────
 
     def load_bundle(self, bundle_path: str) -> dict:
         """
         Load a pre-computed bundle from precompute.py.
         Returns the config dict stored in the bundle.
         No GPU, no CLIP models, no dataset download needed.
+        Calls reset() first so it is safe to call multiple times.
         """
         import json
+
+        self.reset()
 
         log.info(f"Loading pre-computed bundle: {bundle_path} …")
         t0 = time.time()

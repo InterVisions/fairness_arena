@@ -10,6 +10,7 @@
   :root {
     --bg: #111827; --bg-card: #1f2937; --text: #f3f4f6; --text-dim: #9ca3af;
     --accent: #6366f1; --border: #374151; --green: #34d399; --red: #f87171;
+    --yellow: #fbbf24;
     --font: 'IBM Plex Sans', sans-serif; --mono: 'IBM Plex Mono', monospace;
   }
 
@@ -68,6 +69,42 @@
 
   #status { font-family: var(--mono); font-size: 0.75rem; color: var(--green); margin-bottom: 16px; }
   #status.error { color: var(--red); }
+
+  /* Dataset cards */
+  .dataset-list { display: flex; flex-direction: column; gap: 10px; }
+  .dataset-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+  }
+  .dataset-item.active {
+    border-color: var(--accent);
+    background: rgba(99,102,241,0.08);
+  }
+  .dataset-item.switching { opacity: 0.6; pointer-events: none; }
+  .dataset-info { flex: 1; min-width: 0; }
+  .dataset-name { font-weight: 600; font-size: 0.88rem; }
+  .dataset-meta { font-size: 0.72rem; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge {
+    padding: 2px 8px; border-radius: 10px; font-size: 0.68rem; font-weight: 600;
+    white-space: nowrap; font-family: var(--mono);
+  }
+  .badge.active  { background: rgba(99,102,241,0.25); color: #a5b4fc; }
+  .badge.ready   { background: rgba(52,211,153,0.15); color: var(--green); }
+  .badge.missing { background: rgba(248,113,113,0.15); color: var(--red); }
+  .switch-btn {
+    padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: transparent; color: var(--text); cursor: pointer;
+    font-family: var(--font); font-size: 0.75rem; white-space: nowrap;
+  }
+  .switch-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .switch-btn:disabled { opacity: 0.4; cursor: default; }
+  .live-mode-note {
+    font-size: 0.75rem; color: var(--yellow); margin-top: 10px;
+    padding: 8px 12px; border-radius: 6px;
+    background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2);
+  }
 </style>
 </head>
 <body>
@@ -100,10 +137,18 @@
 
   <!-- Actions -->
   <div class="actions">
-    <button onclick="refreshStats()">🔄 Refresh</button>
+    <button onclick="refreshAll()">🔄 Refresh</button>
     <button onclick="exportCSV()">📥 Export votes CSV</button>
     <button onclick="precompute()">⚡ Pre-compute all retrievals</button>
     <button class="danger" onclick="resetElo()">🗑️ Reset Elo ratings</button>
+  </div>
+
+  <!-- Datasets -->
+  <div class="card" style="margin-bottom:16px">
+    <h2>Datasets</h2>
+    <div id="dataset-list" class="dataset-list">
+      <div style="color:var(--text-dim);font-size:0.8rem">Loading…</div>
+    </div>
   </div>
 
   <!-- Elo leaderboard -->
@@ -154,11 +199,11 @@ let TOKEN = '';
 
 function authenticate() {
   TOKEN = document.getElementById('token-input').value;
-  refreshStats();
+  refreshAll();
 }
 
 async function adminFetch(url, opts = {}) {
-  const headers = {'X-Admin-Token': TOKEN, ...(opts.headers || {})};
+  const headers = {'X-Admin-Token': TOKEN, 'Content-Type': 'application/json', ...(opts.headers || {})};
   const resp = await fetch(url, {...opts, headers});
   if (resp.status === 403) {
     document.getElementById('status').textContent = 'Invalid token';
@@ -169,6 +214,10 @@ async function adminFetch(url, opts = {}) {
   document.getElementById('status').className = '';
   document.getElementById('dashboard').style.display = 'block';
   return resp.json();
+}
+
+async function refreshAll() {
+  await Promise.all([refreshStats(), loadDatasets()]);
 }
 
 async function refreshStats() {
@@ -231,6 +280,84 @@ async function refreshStats() {
   s.votes_per_query.slice(0, 15).forEach(q => {
     qBody.innerHTML += `<tr><td>${q.query}</td><td style="font-family:var(--mono)">${q.count}</td></tr>`;
   });
+}
+
+async function loadDatasets() {
+  const data = await adminFetch('/api/admin/datasets');
+  if (!data) return;
+
+  const container = document.getElementById('dataset-list');
+  container.innerHTML = '';
+
+  data.datasets.forEach(ds => {
+    const meta = ds.hf_repo || ds.folder_path || ds.source;
+    const isActive = ds.active;
+    const hasBundle = ds.bundle_available;
+
+    let badgeHtml = '';
+    if (isActive) badgeHtml += `<span class="badge active">active</span> `;
+    badgeHtml += hasBundle
+      ? `<span class="badge ready">bundle ready</span>`
+      : `<span class="badge missing">no bundle</span>`;
+
+    const switchDisabled = isActive || !hasBundle || !data.bundle_mode;
+    const switchTitle = !data.bundle_mode
+      ? 'Start server with --bundles-dir to enable switching'
+      : !hasBundle
+        ? `Run: python precompute.py --dataset-id ${ds.id}`
+        : isActive ? 'Already active' : '';
+
+    const itemDiv = document.createElement('div');
+    itemDiv.className = 'dataset-item' + (isActive ? ' active' : '');
+    itemDiv.id = `ds-item-${ds.id}`;
+    itemDiv.innerHTML = `
+      <div class="dataset-info">
+        <div class="dataset-name">${ds.name}</div>
+        <div class="dataset-meta">${meta}${ds.max_images ? ' · max ' + ds.max_images + ' images' : ''}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        ${badgeHtml}
+        <button class="switch-btn" id="switch-btn-${ds.id}"
+          onclick="switchDataset('${ds.id}')"
+          ${switchDisabled ? 'disabled' : ''}
+          title="${switchTitle}">
+          Switch
+        </button>
+      </div>`;
+    container.appendChild(itemDiv);
+  });
+
+  if (!data.bundle_mode) {
+    const note = document.createElement('div');
+    note.className = 'live-mode-note';
+    note.textContent = 'Dataset switching requires bundle mode. Start the server with --bundles-dir data/ to enable it.';
+    container.appendChild(note);
+  }
+}
+
+async function switchDataset(datasetId) {
+  if (!confirm(`Switch active dataset to "${datasetId}"? This will reload the bundle.`)) return;
+
+  // Visual feedback
+  const item = document.getElementById(`ds-item-${datasetId}`);
+  const btn  = document.getElementById(`switch-btn-${datasetId}`);
+  if (item) item.classList.add('switching');
+  if (btn)  btn.textContent = 'Switching…';
+
+  const data = await adminFetch('/api/admin/datasets/switch', {
+    method: 'POST',
+    body: JSON.stringify({ dataset_id: datasetId }),
+  });
+
+  if (data && data.status === 'ok') {
+    await refreshAll();
+  } else {
+    // Restore state on failure
+    if (item) item.classList.remove('switching');
+    if (btn)  btn.textContent = 'Switch';
+    const msg = data ? (data.detail || JSON.stringify(data)) : 'Request failed';
+    alert(`Failed to switch dataset: ${msg}`);
+  }
 }
 
 async function exportCSV() {

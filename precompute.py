@@ -3,11 +3,21 @@ from __future__ import annotations
 """
 Fairness Arena — Pre-compute embeddings and retrieval results.
 ==============================================================
-Run this on a GPU machine. It produces a single portable bundle file
+Run this on a GPU machine. It produces one portable bundle file per dataset
 that the server can load on any CPU-only machine.
 
 Usage:
-    python precompute.py --config config/default_config.json --output data/arena_bundle.npz
+    # Precompute the active dataset (default)
+    python precompute.py --config config/default_config.json
+
+    # Precompute a specific dataset by id
+    python precompute.py --dataset-id fairface
+
+    # Precompute all datasets defined in config
+    python precompute.py --all-datasets
+
+    # Explicit output path (single dataset only)
+    python precompute.py --dataset-id flickr30k --output data/arena_bundle_flickr30k.npz
 
 What it does:
     1. Loads all enabled CLIP models
@@ -16,9 +26,9 @@ What it does:
     4. Embeds all predefined query prompts with every model
     5. Computes ranked retrieval results for every (model, query) pair
     6. Saves thumbnail JPEGs of all images for web serving
-    7. Packs everything into a single .npz file
+    7. Packs everything into a single .npz file per dataset
 
-The server then loads this bundle at startup — no GPU, no model loading,
+The server then loads a bundle at startup — no GPU, no model loading,
 no HuggingFace download needed.
 """
 
@@ -41,6 +51,29 @@ log = logging.getLogger("precompute")
 def load_config(path: str) -> dict:
     with open(path) as f:
         return json.load(f)
+
+
+def get_datasets(config: dict) -> list[dict]:
+    """
+    Return the list of dataset configs, handling both old and new formats.
+    Old format: single "dataset" key.
+    New format: "datasets" list with per-entry "id" and "name".
+    """
+    if "datasets" in config:
+        return config["datasets"]
+    # Backward compat: wrap the single dataset entry
+    ds = config.get("dataset", {})
+    if not ds:
+        raise ValueError("No dataset(s) defined in config")
+    if "id" not in ds:
+        # Derive an id from the repo name or folder
+        if ds.get("source") == "huggingface":
+            ds = dict(ds, id=ds["hf_repo"].split("/")[-1].lower())
+        else:
+            ds = dict(ds, id=Path(ds.get("folder_path", "dataset")).stem.lower())
+    if "name" not in ds:
+        ds = dict(ds, name=ds["id"])
+    return [ds]
 
 
 def load_dataset(ds_cfg: dict) -> list[Image.Image]:
@@ -141,27 +174,23 @@ def compute_retrievals(image_embs: np.ndarray, query_embs: np.ndarray,
     return results
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Pre-compute Fairness Arena bundle")
-    parser.add_argument("--config", default="config/default_config.json")
-    parser.add_argument("--output", default="data/arena_bundle.npz")
-    parser.add_argument("--device", default="auto")
-    parser.add_argument("--thumbnail-size", type=int, default=400)
-    parser.add_argument("--batch-size", type=int, default=64)
-    args = parser.parse_args()
+def precompute_dataset(ds_cfg: dict, config: dict, output_path: Path,
+                       device: str, thumbnail_size: int, batch_size: int):
+    """Precompute and save a bundle for a single dataset."""
+    import open_clip
 
-    config = load_config(args.config)
-    device = "cuda" if (args.device == "auto" and torch.cuda.is_available()) else args.device
-    if device == "auto":
-        device = "cpu"
-    log.info(f"Device: {device}")
+    ds_id = ds_cfg.get("id", "dataset")
+    log.info(f"\n{'#'*60}")
+    log.info(f"  Dataset: {ds_cfg.get('name', ds_id)} (id={ds_id})")
+    log.info(f"  Output:  {output_path}")
+    log.info(f"{'#'*60}\n")
 
     # ── Load dataset ─────────────────────────────────────────────────
-    images = load_dataset(config.get("dataset", {}))
+    images = load_dataset(ds_cfg)
     log.info(f"Dataset: {len(images)} images")
 
     # ── Create thumbnails ────────────────────────────────────────────
-    thumbnails = make_thumbnails(images, max_size=args.thumbnail_size)
+    thumbnails = make_thumbnails(images, max_size=thumbnail_size)
 
     # ── Queries ──────────────────────────────────────────────────────
     queries = config["arena"].get("predefined_queries", [])
@@ -169,8 +198,6 @@ def main():
     log.info(f"Queries: {len(queries)}, top_k: {top_k}")
 
     # ── Process each model ───────────────────────────────────────────
-    import open_clip
-
     all_image_embs = {}     # model_id -> (N, D) array
     all_retrievals = {}     # model_id -> {query -> {indices, similarities}}
     model_ids = []
@@ -200,7 +227,7 @@ def main():
         # Embed images
         log.info("Embedding images …")
         t0 = time.time()
-        img_embs = embed_images(model, preprocess, images, device, batch_size=args.batch_size)
+        img_embs = embed_images(model, preprocess, images, device, batch_size=batch_size)
         log.info(f"Image embeddings: {img_embs.shape} in {time.time() - t0:.1f}s")
         all_image_embs[mid] = img_embs
 
@@ -217,11 +244,11 @@ def main():
 
         # Free GPU memory
         del model, preprocess, tokenizer
-        torch.cuda.empty_cache() if device == "cuda" else None
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
     # ── Pack into bundle ─────────────────────────────────────────────
-    log.info(f"\nPacking bundle → {args.output}")
-    output_path = Path(args.output)
+    log.info(f"\nPacking bundle → {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     bundle = {
@@ -229,6 +256,7 @@ def main():
         "config_json": np.array([json.dumps(config)]),
         "queries_json": np.array([json.dumps(queries)]),
         "model_ids_json": np.array([json.dumps(model_ids)]),
+        "dataset_id": np.array([ds_id]),
         "n_images": np.array([len(images)]),
 
         # Thumbnails as variable-length byte arrays
@@ -247,8 +275,79 @@ def main():
     file_size = output_path.stat().st_size / (1024 * 1024)
     log.info(f"✓ Bundle saved: {file_size:.1f} MB")
     log.info(f"  - {len(images)} images, {len(model_ids)} models, {len(queries)} queries")
-    log.info(f"\nCopy {args.output} to your server machine and run:")
-    log.info(f"  python server.py --bundle {args.output}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Pre-compute Fairness Arena bundle")
+    parser.add_argument("--config", default="config/default_config.json")
+    parser.add_argument("--output", default=None,
+                        help="Output path for the bundle. Defaults to "
+                             "data/arena_bundle_{dataset_id}.npz. "
+                             "Only used when processing a single dataset.")
+    parser.add_argument("--dataset-id", default=None,
+                        help="ID of a specific dataset to precompute (must match an entry "
+                             "in config 'datasets'). Defaults to the active dataset.")
+    parser.add_argument("--all-datasets", action="store_true",
+                        help="Precompute bundles for all datasets defined in config.")
+    parser.add_argument("--bundles-dir", default="data",
+                        help="Directory where bundle files are written (default: data/).")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--thumbnail-size", type=int, default=400)
+    parser.add_argument("--batch-size", type=int, default=64)
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+    device = "cuda" if (args.device == "auto" and torch.cuda.is_available()) else args.device
+    if device == "auto":
+        device = "cpu"
+    log.info(f"Device: {device}")
+
+    all_datasets = get_datasets(config)
+    active_id = config.get("arena", {}).get("active_dataset_id")
+
+    # Determine which datasets to process
+    if args.all_datasets:
+        target_datasets = all_datasets
+    elif args.dataset_id:
+        target_datasets = [d for d in all_datasets if d["id"] == args.dataset_id]
+        if not target_datasets:
+            ids = [d["id"] for d in all_datasets]
+            raise SystemExit(f"Dataset '{args.dataset_id}' not found. Available: {ids}")
+    else:
+        # Default: active dataset, or first dataset if no active_id set
+        if active_id:
+            target_datasets = [d for d in all_datasets if d["id"] == active_id]
+            if not target_datasets:
+                raise SystemExit(f"Active dataset '{active_id}' not found in config datasets.")
+        else:
+            target_datasets = all_datasets[:1]
+
+    if not target_datasets:
+        raise SystemExit("No datasets to process.")
+
+    bundles_dir = Path(args.bundles_dir)
+
+    for ds_cfg in target_datasets:
+        ds_id = ds_cfg["id"]
+        if args.output and len(target_datasets) == 1:
+            output_path = Path(args.output)
+        else:
+            output_path = bundles_dir / f"arena_bundle_{ds_id}.npz"
+
+        precompute_dataset(
+            ds_cfg=ds_cfg,
+            config=config,
+            output_path=output_path,
+            device=device,
+            thumbnail_size=args.thumbnail_size,
+            batch_size=args.batch_size,
+        )
+
+    log.info("\nAll done. Copy the bundle(s) to your server and run:")
+    for ds_cfg in target_datasets:
+        ds_id = ds_cfg["id"]
+        bundle = bundles_dir / f"arena_bundle_{ds_id}.npz"
+        log.info(f"  python server.py --bundles-dir data/")
 
 
 if __name__ == "__main__":
