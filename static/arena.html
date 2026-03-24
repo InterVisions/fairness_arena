@@ -511,8 +511,8 @@ async function startMatch() {
     (match.right.label === 'Model A' ? 'label-a' : 'label-b');
 
   // Load images
-  loadGrid('grid-left', match.left.indices);
-  loadGrid('grid-right', match.right.indices);
+  loadGrid('grid-left', match.left.indices, match.dataset_id);
+  loadGrid('grid-right', match.right.indices, match.dataset_id);
 
   // Show judge question
   const jq = document.getElementById('judge-question');
@@ -541,12 +541,12 @@ async function startMatch() {
   }
 }
 
-function loadGrid(gridId, indices) {
+function loadGrid(gridId, indices, datasetId) {
   const grid = document.getElementById(gridId);
   grid.innerHTML = '';
   for (const idx of indices) {
     const img = document.createElement('img');
-    img.src = `/api/image/${idx}`;
+    img.src = `/api/image/${idx}?v=${datasetId}`;
     img.loading = 'lazy';
     img.alt = `Image ${idx}`;
     grid.appendChild(img);

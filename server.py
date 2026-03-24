@@ -164,10 +164,13 @@ async def api_match(query: str, participant_id: str = ""):
     left_result = await get_retrieval(left_model, query, n_images)
     right_result = await get_retrieval(right_model, query, n_images)
 
+    dataset_id = CONFIG.get("arena", {}).get("active_dataset_id", "default")
+
     return {
         "model_a": model_a,
         "model_b": model_b,
         "position_a": position_a,
+        "dataset_id": dataset_id,
         "left": {
             "label": "Model A" if position_a == "left" else "Model B",
             "indices": left_result["indices"],
