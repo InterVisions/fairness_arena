@@ -466,6 +466,7 @@ async def startup():
                 split=ds_cfg.get("hf_split", "train"),
                 image_column=ds_cfg.get("image_column", "image"),
                 max_images=ds_cfg.get("max_images", 2000),
+                hf_config=ds_cfg.get("hf_config"),
             )
         elif source == "folder":
             ENGINE.load_dataset_from_folder(

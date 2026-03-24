@@ -87,8 +87,12 @@ def load_dataset(ds_cfg: dict) -> list[Image.Image]:
         split = ds_cfg.get("hf_split", "train")
         image_col = ds_cfg.get("image_column", "image")
 
-        log.info(f"Loading dataset {repo} (split={split}) …")
-        ds = hf_load(repo, split=split)
+        hf_config = ds_cfg.get("hf_config")
+        log.info(f"Loading dataset {repo} (config={hf_config}, split={split}) …")
+        load_kwargs = {"split": split}
+        if hf_config:
+            load_kwargs["name"] = hf_config
+        ds = hf_load(repo, **load_kwargs)
         if max_images and len(ds) > max_images:
             ds = ds.select(range(max_images))
 

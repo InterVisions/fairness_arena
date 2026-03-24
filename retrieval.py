@@ -79,14 +79,18 @@ class RetrievalEngine:
 
     def load_dataset_from_huggingface(self, repo: str, split: str = "train",
                                        image_column: str = "image",
-                                       max_images: int = 2000):
+                                       max_images: int = 2000,
+                                       hf_config: str = None):
         """Load an image dataset from HuggingFace."""
         from datasets import load_dataset
 
-        log.info(f"Loading dataset {repo} (split={split}, max={max_images}) …")
+        log.info(f"Loading dataset {repo} (config={hf_config}, split={split}, max={max_images}) …")
         t0 = time.time()
 
-        ds = load_dataset(repo, split=split)
+        load_kwargs = {"split": split}
+        if hf_config:
+            load_kwargs["name"] = hf_config
+        ds = load_dataset(repo, **load_kwargs)
         if max_images and len(ds) > max_images:
             ds = ds.select(range(max_images))
 
