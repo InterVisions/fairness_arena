@@ -11,12 +11,12 @@ Environment=PYTHONUNBUFFERED=1
 # ── EDIT THESE ──────────────────────────────────────────────
 # Generate a token: python3 -c "import secrets; print(secrets.token_hex(32))"
 Environment=ADMIN_TOKEN=changeme
-Environment=BUNDLE_PATH=data/arena_bundle.npz
+Environment=BUNDLES_DIR=data
 Environment=PORT=8080
 # ────────────────────────────────────────────────────────────
 
 ExecStart=/home/ubuntu/fairness_arena/venv/bin/python server.py \
-    --bundle ${BUNDLE_PATH} \
+    --bundles-dir ${BUNDLES_DIR} \
     --admin-token ${ADMIN_TOKEN} \
     --port ${PORT}
 
