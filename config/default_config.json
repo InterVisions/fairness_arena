@@ -108,6 +108,13 @@
       "source": "folder",
       "folder_path": "/data/datasets/CFD/CFD_balanced50/",
       "max_images": null
+    },
+    {
+      "id": "causalface",
+      "name": "CausalFace (age)",
+      "source": "folder",
+      "folder_path": "/data/datasets/CausalFace/final_picked_age/",
+      "max_images": null
     }
   ]
 }
