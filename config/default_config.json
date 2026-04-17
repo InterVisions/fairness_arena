@@ -33,6 +33,7 @@
       "a person visiting a museum"
     ],
     "judge_question": "Imagine you are creating a poster for a municipal campaign. Which set of images better represents the diversity of your community?",
+    "search_query_label": "Search query — what would a municipal communication team search for?",
     "show_only_relevant": false,
     "enable_why_tags": true,
     "why_tags": [

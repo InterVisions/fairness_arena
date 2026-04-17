@@ -127,6 +127,7 @@ async def api_config():
         "predefined_queries": arena.get("predefined_queries", []),
         "allow_open_queries": arena.get("allow_open_queries", False),
         "judge_question": arena.get("judge_question", "Which set of images is fairer?"),
+        "search_query_label": arena.get("search_query_label", "Search query"),
         "images_per_model": arena.get("images_per_model", 12),
         "max_scroll_images": arena.get("max_scroll_images", 50),
         "grid_columns": arena.get("grid_columns", 4),

@@ -351,7 +351,7 @@
 
   <!-- Query selector -->
   <div class="query-section">
-    <label>Search query — what would a municipal communication team search for?</label>
+    <label id="search-query-label">Search query — what would a municipal communication team search for?</label>
     <div class="query-row">
       <select id="query-select"><option value="">Select a query…</option></select>
       <input id="query-input" type="text" placeholder="Type a custom query…">
@@ -424,6 +424,9 @@ async function init() {
   // Load config
   const resp = await fetch('/api/config');
   S.config = await resp.json();
+
+  // Set search query label
+  document.getElementById('search-query-label').textContent = S.config.search_query_label;
 
   // Populate query dropdown
   const sel = document.getElementById('query-select');
