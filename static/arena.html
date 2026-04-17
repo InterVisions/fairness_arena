@@ -649,8 +649,17 @@ async function submitVote() {
   document.getElementById('vote-count-display').textContent = `${S.totalVotes} votes this session`;
   document.getElementById('why-freetext').value = '';
 
-  // Auto-load next match with a random query
-  randomQuery();
+  // Reset to initial state
+  S.currentMatch = null;
+  S.selectedVote = null;
+  S.selectedTags.clear();
+  document.getElementById('comparison').style.display = 'none';
+  document.getElementById('vote-panel').style.display = 'none';
+  document.getElementById('grid-left').innerHTML = '';
+  document.getElementById('grid-right').innerHTML = '';
+  document.getElementById('query-select').value = '';
+  document.getElementById('why-section').classList.remove('visible');
+  document.querySelectorAll('.vote-btn').forEach(b => b.classList.remove('selected'));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
