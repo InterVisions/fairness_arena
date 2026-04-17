@@ -447,6 +447,19 @@ async function init() {
     g.style.gridTemplateColumns = `repeat(${S.config.grid_columns}, 1fr)`;
   });
 
+  // Sync scrolling between grids
+  const gridLeft = document.getElementById('grid-left');
+  const gridRight = document.getElementById('grid-right');
+  let syncing = false;
+  function syncScroll(source, target) {
+    if (syncing) return;
+    syncing = true;
+    target.scrollTop = source.scrollTop;
+    syncing = false;
+  }
+  gridLeft.addEventListener('scroll', () => syncScroll(gridLeft, gridRight));
+  gridRight.addEventListener('scroll', () => syncScroll(gridRight, gridLeft));
+
   // Check registration
   if (S.pid) {
     document.getElementById('reg-modal').classList.add('hidden');
