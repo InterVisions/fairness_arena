@@ -519,8 +519,12 @@ async function startMatch() {
 
   // Show judge question
   const jq = document.getElementById('judge-question');
-  jq.textContent = S.config.judge_question;
-  jq.style.display = 'block';
+  if (S.config.judge_question) {
+    jq.textContent = S.config.judge_question;
+    jq.style.display = 'block';
+  } else {
+    jq.style.display = 'none';
+  }
 
   // Show vote panel
   document.getElementById('vote-panel').style.display = 'block';
