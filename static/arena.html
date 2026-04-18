@@ -321,6 +321,61 @@
   /* ── Loading state ───────────────────────────────── */
   .loading { opacity: 0.5; pointer-events: none; }
 
+  /* ── Mobile portrait: swipe carousel ────────────────── */
+  .carousel-indicator {
+    display: none;
+  }
+
+  @media (max-width: 767px) and (orientation: portrait) {
+    .comparison {
+      display: block;
+      overflow-x: scroll;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+      white-space: nowrap;
+      margin-bottom: 8px;
+    }
+
+    .comparison-divider { display: none; }
+
+    .model-panel {
+      display: inline-block;
+      width: 100%;
+      white-space: normal;
+      scroll-snap-align: start;
+      vertical-align: top;
+    }
+
+    .image-grid { max-height: 45vh; }
+
+    .carousel-indicator {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      user-select: none;
+    }
+
+    .carousel-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 0.2s;
+    }
+
+    .carousel-dot.active { background: var(--accent); }
+
+    .container { padding: 10px; }
+    .query-section { padding: 10px 12px; margin-bottom: 8px; }
+    .vote-panel { padding: 12px 16px; }
+    .vote-btn { padding: 10px 14px; font-size: 0.82rem; }
+  }
+
   /* ── Mobile landscape ───────────────────────────────── */
   @media (max-width: 900px) and (orientation: landscape) {
     .header { padding: 6px 16px; }
@@ -403,6 +458,14 @@
     </div>
   </div>
 
+  <!-- Carousel indicator (portrait mobile only) -->
+  <div class="carousel-indicator" id="carousel-indicator">
+    <span>👈</span>
+    <span class="carousel-dot active" id="dot-left"></span>
+    <span class="carousel-dot" id="dot-right"></span>
+    <span>👉</span>
+  </div>
+
   <!-- Voting -->
   <div class="vote-panel" id="vote-panel" style="display:none">
     <div class="vote-buttons">
@@ -480,6 +543,14 @@ async function init() {
   }
   gridLeft.addEventListener('scroll', () => syncScroll(gridLeft, gridRight));
   gridRight.addEventListener('scroll', () => syncScroll(gridRight, gridLeft));
+
+  // Update carousel dots on horizontal swipe (portrait mobile)
+  const comparison = document.getElementById('comparison');
+  comparison.addEventListener('scroll', () => {
+    const atRight = comparison.scrollLeft > comparison.scrollWidth / 2 - 10;
+    document.getElementById('dot-left').classList.toggle('active', !atRight);
+    document.getElementById('dot-right').classList.toggle('active', atRight);
+  });
 
   // Check registration
   if (S.pid) {
