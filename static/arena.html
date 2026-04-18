@@ -615,7 +615,7 @@ async function startMatch() {
 
   // Show loading
   const isPortrait = window.matchMedia('(max-width: 767px) and (orientation: portrait)').matches;
-  document.getElementById('comparison').style.display = isPortrait ? 'block' : 'grid';
+  document.getElementById('comparison').style.display = isPortrait ? 'flex' : 'grid';
   document.getElementById('comparison').classList.add('loading');
   document.getElementById('vote-panel').style.display = 'none';
 
