@@ -320,6 +320,27 @@
 
   /* ── Loading state ───────────────────────────────── */
   .loading { opacity: 0.5; pointer-events: none; }
+
+  /* ── Mobile landscape ───────────────────────────────── */
+  @media (max-width: 900px) and (orientation: landscape) {
+    .header { padding: 6px 16px; }
+    .header h1 { font-size: 1rem; }
+    .header-links { gap: 8px; }
+
+    .container { padding: 8px 12px; }
+
+    .query-section { padding: 8px 12px; margin-bottom: 8px; }
+    .query-section label { display: none; }
+    .btn { padding: 7px 12px; font-size: 0.78rem; }
+
+    .judge-question { padding: 6px; font-size: 0.85rem; margin-bottom: 8px; }
+
+    .image-grid { max-height: 28vh; }
+
+    .vote-panel { padding: 10px 16px; }
+    .vote-buttons { margin-bottom: 8px; }
+    .vote-btn { padding: 8px 16px; font-size: 0.82rem; }
+  }
 </style>
 </head>
 <body>
