@@ -328,23 +328,21 @@
 
   @media (max-width: 767px) and (orientation: portrait) {
     .comparison {
-      display: block;
+      display: flex;
+      flex-wrap: nowrap;
       overflow-x: scroll;
       scroll-snap-type: x mandatory;
       scroll-behavior: smooth;
       -webkit-overflow-scrolling: touch;
-      white-space: nowrap;
       margin-bottom: 8px;
     }
 
     .comparison-divider { display: none; }
 
     .model-panel {
-      display: inline-block;
-      width: 100%;
-      white-space: normal;
+      flex: 0 0 100%;
       scroll-snap-align: start;
-      vertical-align: top;
+      min-width: 0;
     }
 
     .image-grid { max-height: 45vh; }
