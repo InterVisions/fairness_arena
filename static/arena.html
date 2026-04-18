@@ -370,6 +370,15 @@
 
     .carousel-dot.active { background: var(--accent); }
 
+    .carousel-arrow {
+      background: none;
+      border: none;
+      font-size: 1rem;
+      color: var(--accent);
+      cursor: pointer;
+      padding: 4px 8px;
+    }
+
     .container { padding: 10px; }
     .query-section { padding: 10px 12px; margin-bottom: 8px; }
     .vote-panel { padding: 12px 16px; }
@@ -460,10 +469,10 @@
 
   <!-- Carousel indicator (portrait mobile only) -->
   <div class="carousel-indicator" id="carousel-indicator">
-    <span>👈</span>
+    <button class="carousel-arrow" onclick="carouselGo('left')">&#9664;</button>
     <span class="carousel-dot active" id="dot-left"></span>
     <span class="carousel-dot" id="dot-right"></span>
-    <span>👉</span>
+    <button class="carousel-arrow" onclick="carouselGo('right')">&#9654;</button>
   </div>
 
   <!-- Voting -->
@@ -581,6 +590,11 @@ async function register() {
 // ═══════════════════════════════════════════════════════════════════════
 //  Match
 // ═══════════════════════════════════════════════════════════════════════
+function carouselGo(side) {
+  const el = document.getElementById('comparison');
+  el.scrollTo({ left: side === 'right' ? el.scrollWidth : 0, behavior: 'smooth' });
+}
+
 function randomQuery() {
   const queries = S.config.predefined_queries;
   const q = queries[Math.floor(Math.random() * queries.length)];
@@ -602,7 +616,8 @@ async function startMatch() {
   document.getElementById('why-section').classList.remove('visible');
 
   // Show loading
-  document.getElementById('comparison').style.display = 'grid';
+  const isPortrait = window.matchMedia('(max-width: 767px) and (orientation: portrait)').matches;
+  document.getElementById('comparison').style.display = isPortrait ? 'block' : 'grid';
   document.getElementById('comparison').classList.add('loading');
   document.getElementById('vote-panel').style.display = 'none';
 
