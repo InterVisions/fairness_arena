@@ -187,7 +187,7 @@ async def api_match(query: str, participant_id: str = ""):
 
 
 async def get_retrieval(model_id: str, query: str, n_images: int) -> dict:
-    """Get retrieval results: bundle → cache → compute live."""
+    """Get retrieval results: bundle → DB cache → live encode with lazy text encoder."""
     # Try bundle first (pre-computed, fastest)
     bundle_result = ENGINE.bundle_retrieve(model_id, query, n_images)
     if bundle_result:
@@ -198,12 +198,18 @@ async def get_retrieval(model_id: str, query: str, n_images: int) -> dict:
     if cached:
         return {"indices": cached["indices"][:n_images], "similarities": cached["similarities"][:n_images]}
 
-    # Compute fresh (needs models loaded)
-    if model_id not in ENGINE.models:
-        raise HTTPException(400, f"Model {model_id} not loaded and no pre-computed results available")
-    result = ENGINE.retrieve(model_id, query, top_k=n_images)
-    await db.cache_retrieval(model_id, query, result["indices"], result["similarities"])
-    return result
+    # Encode live using lazy text encoder + stored image embeddings from bundle
+    if model_id not in ENGINE.image_embeddings:
+        raise HTTPException(400, f"No image embeddings available for model {model_id}")
+    query_emb = await ENGINE.encode_query_async(model_id, query)
+    img_embs = ENGINE.image_embeddings[model_id]
+    import numpy as np
+    sims = (query_emb @ img_embs.T).squeeze(0).numpy()
+    ranked_idx = np.argsort(sims)[::-1]
+    indices = ranked_idx.tolist()
+    similarities = [round(float(sims[i]), 4) for i in ranked_idx]
+    await db.cache_retrieval(model_id, query, indices, similarities)
+    return {"indices": indices[:n_images], "similarities": similarities[:n_images]}
 
 
 @app.get("/api/image/{index}")
