@@ -283,6 +283,15 @@ async def cache_retrieval(model_id: str, query: str, indices: list, similarities
         await db.commit()
 
 
+async def get_cached_query_list() -> list[str]:
+    """Return distinct queries accumulated in the retrieval cache (open queries)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT DISTINCT query FROM retrieval_cache ORDER BY computed_at ASC"
+        )
+        return [row[0] for row in await cursor.fetchall()]
+
+
 async def get_cached_retrieval(model_id: str, query: str) -> dict | None:
     """Get cached retrieval results."""
     key = f"{model_id}::{query}"

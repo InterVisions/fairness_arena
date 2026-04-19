@@ -123,8 +123,13 @@ async def api_register(request: Request):
 async def api_config():
     """Return public-facing config (queries, question, etc.)."""
     arena = CONFIG.get("arena", {})
-    # Queries come from the bundle (single source of truth), not from config
+    # Predefined queries from bundle + any open queries accumulated in DB cache
     queries = ENGINE.bundle_queries()
+    if arena.get("allow_open_queries", False):
+        cached_queries = await db.get_cached_query_list()
+        for q in cached_queries:
+            if q not in queries:
+                queries.append(q)
     return {
         "predefined_queries": queries,
         "allow_open_queries": arena.get("allow_open_queries", False),
