@@ -529,13 +529,7 @@ async function init() {
   document.getElementById('search-query-label').textContent = S.config.search_query_label;
 
   // Populate query dropdown
-  const sel = document.getElementById('query-select');
-  for (const q of S.config.predefined_queries) {
-    const opt = document.createElement('option');
-    opt.value = q;
-    opt.textContent = q;
-    sel.appendChild(opt);
-  }
+  populateQueries(S.config.predefined_queries);
 
   // Show/hide custom input
   if (S.config.allow_open_queries) {
@@ -618,8 +612,28 @@ function carouselGo(side) {
   el.scrollTo({ left: side === 'right' ? el.scrollWidth : 0, behavior: 'smooth' });
 }
 
+function populateQueries(queries) {
+  const sel = document.getElementById('query-select');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Select a query…</option>';
+  for (const q of queries) {
+    const opt = document.createElement('option');
+    opt.value = q;
+    opt.textContent = q;
+    sel.appendChild(opt);
+  }
+  if (current) sel.value = current;
+}
+
+async function refreshQueries() {
+  const resp = await fetch('/api/config');
+  const cfg = await resp.json();
+  S.config = cfg;
+  populateQueries(cfg.predefined_queries || []);
+}
+
 function randomQuery() {
-  const queries = S.config.predefined_queries;
+  const queries = S.config.predefined_queries || [];
   const q = queries[Math.floor(Math.random() * queries.length)];
   document.getElementById('query-select').value = q;
   startMatch();
@@ -790,6 +804,9 @@ async function submitVote() {
   document.getElementById('query-select').value = '';
   document.getElementById('why-section').classList.remove('visible');
   document.querySelectorAll('.vote-btn').forEach(b => b.classList.remove('selected'));
+
+  // Refresh query list so open queries become available in the dropdown
+  refreshQueries();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
