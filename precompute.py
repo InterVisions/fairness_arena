@@ -284,6 +284,8 @@ def precompute_dataset(ds_cfg: dict, config: dict, output_path: Path,
 def main():
     parser = argparse.ArgumentParser(description="Pre-compute Fairness Arena bundle")
     parser.add_argument("--config", default="config/default_config.json")
+    parser.add_argument("--queries", default="config/queries.txt",
+                        help="Path to queries file (one query per line).")
     parser.add_argument("--output", default=None,
                         help="Output path for the bundle. Defaults to "
                              "data/arena_bundle_{dataset_id}.npz. "
@@ -301,6 +303,14 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+
+    queries_path = Path(args.queries)
+    if not queries_path.exists():
+        raise SystemExit(f"Queries file not found: {queries_path}")
+    queries = [q.strip() for q in queries_path.read_text().splitlines() if q.strip()]
+    log.info(f"Loaded {len(queries)} queries from {queries_path}")
+    config.setdefault("arena", {})["predefined_queries"] = queries
+
     device = "cuda" if (args.device == "auto" and torch.cuda.is_available()) else args.device
     if device == "auto":
         device = "cpu"
