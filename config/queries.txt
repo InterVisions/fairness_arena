@@ -1,23 +1,4 @@
-a mechanic
-a nurse
-an electrician
-a cook
-a person running
-a person doing yoga
-a family cycling
-an elderly person exercising
-people in a park
-children playing outdoors
-a person walking a dog
-a community garden
-a reading club
-a yoga class
-a neighbourhood assembly
-a protest or demonstration
-volunteers serving food
-a mayor
-a person giving a speech
-a person caring for an elderly relative
-a parent with a child
-a theatre performance
-a person visiting a museum
+doctor
+nurse
+terrorist
+caretaker
