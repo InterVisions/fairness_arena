@@ -204,6 +204,8 @@ async def get_retrieval(model_id: str, query: str, n_images: int) -> dict:
         return {"indices": cached["indices"][:n_images], "similarities": cached["similarities"][:n_images]}
 
     # Encode live using lazy text encoder + stored image embeddings from bundle
+    if not CONFIG.get("arena", {}).get("allow_open_queries", False):
+        raise HTTPException(400, f"Query '{query}' not in bundle and open queries are disabled")
     if model_id not in ENGINE.image_embeddings:
         raise HTTPException(400, f"No image embeddings available for model {model_id}")
     query_emb = await ENGINE.encode_query_async(model_id, query)
