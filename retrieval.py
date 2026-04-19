@@ -4,6 +4,7 @@ Retrieval engine — loads CLIP models and dataset, computes ranked results.
 All results are pre-computed and cached in SQLite for fast serving.
 """
 
+import asyncio
 import logging
 import time
 from io import BytesIO
@@ -34,6 +35,9 @@ class RetrievalEngine:
         self.thumbnails = []      # pre-computed JPEG bytes (from bundle)
         self._bundle_model_ids = []
         self._bundle_queries = []
+        self._bundle_model_configs = []  # model configs stored in bundle
+        self._text_encoders = {}         # model_id -> {model, tokenizer} (lazy loaded)
+        self._text_encoder_lock = asyncio.Lock()
 
     # ── Model loading ────────────────────────────────────────────────────
 
@@ -177,6 +181,37 @@ class RetrievalEngine:
         emb = F.normalize(emb, dim=-1)
         return emb.cpu()
 
+    async def ensure_text_encoder(self, model_id: str):
+        """Lazily load the text encoder for a model (bundle mode, no GPU needed)."""
+        if model_id in self._text_encoders:
+            return
+        async with self._text_encoder_lock:
+            if model_id in self._text_encoders:
+                return
+            cfg = next((m for m in self._bundle_model_configs if m["id"] == model_id), None)
+            if cfg is None:
+                raise RuntimeError(f"No config found for model {model_id}")
+            import open_clip
+            log.info(f"Lazy-loading text encoder for {model_id} …")
+            t0 = time.time()
+            model, _, _ = open_clip.create_model_and_transforms(
+                cfg["model_name"], pretrained=cfg.get("pretrained", "openai"), device=self.device
+            )
+            tokenizer = open_clip.get_tokenizer(cfg["model_name"])
+            model.eval()
+            self._text_encoders[model_id] = {"model": model, "tokenizer": tokenizer}
+            log.info(f"✓ Text encoder for {model_id} loaded in {time.time() - t0:.1f}s")
+
+    @torch.no_grad()
+    async def encode_query_async(self, model_id: str, query: str) -> torch.Tensor:
+        """Encode a text query using lazily loaded text encoder."""
+        await self.ensure_text_encoder(model_id)
+        enc = self._text_encoders[model_id]
+        tokens = enc["tokenizer"]([query]).to(self.device)
+        emb = enc["model"].encode_text(tokens)
+        emb = F.normalize(emb, dim=-1)
+        return emb.cpu()
+
     # ── Retrieval ────────────────────────────────────────────────────────
 
     def retrieve(self, model_id: str, query: str, top_k: int = None) -> dict:
@@ -241,6 +276,8 @@ class RetrievalEngine:
         self.thumbnails = []
         self._bundle_model_ids = []
         self._bundle_queries = []
+        self._bundle_model_configs = []
+        self._text_encoders = {}
         if hasattr(self, '_bundle_retrievals'):
             del self._bundle_retrievals
 
@@ -269,6 +306,7 @@ class RetrievalEngine:
 
         self._bundle_model_ids = model_ids
         self._bundle_queries = queries
+        self._bundle_model_configs = config.get("models", [])
 
         # Thumbnails
         offsets = data["thumbnail_offsets"]
