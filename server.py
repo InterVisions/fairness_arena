@@ -123,8 +123,10 @@ async def api_register(request: Request):
 async def api_config():
     """Return public-facing config (queries, question, etc.)."""
     arena = CONFIG.get("arena", {})
+    # Queries come from the bundle (single source of truth), not from config
+    queries = ENGINE.bundle_queries()
     return {
-        "predefined_queries": arena.get("predefined_queries", []),
+        "predefined_queries": queries,
         "allow_open_queries": arena.get("allow_open_queries", False),
         "judge_question": arena.get("judge_question", "Which set of images is fairer?"),
         "search_query_label": arena.get("search_query_label", "Search query"),

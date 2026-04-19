@@ -225,6 +225,10 @@ class RetrievalEngine:
             return self._bundle_model_ids
         return list(self.models.keys())
 
+    def bundle_queries(self) -> list[str]:
+        """Return the query list baked into the bundle (source of truth)."""
+        return list(self._bundle_queries)
+
     # ── Reset ────────────────────────────────────────────────────────────
 
     def reset(self):
