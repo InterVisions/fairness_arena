@@ -842,8 +842,10 @@ function selectVote(choice) {
     document.getElementById('panel-right').classList.add('selected');
   }
 
-  // Show why section
-  document.getElementById('why-section').classList.add('visible');
+  // Show why section 15% of the time
+  if (Math.random() < 0.15) {
+    document.getElementById('why-section').classList.add('visible');
+  }
 }
 
 async function submitVote() {
