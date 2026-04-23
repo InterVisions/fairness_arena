@@ -188,8 +188,10 @@
     transition: border-color 0.2s;
   }
 
-  .model-panel.panel-a:hover { border-color: rgba(29, 78, 216, 0.55); }
-  .model-panel.panel-b:hover { border-color: rgba(190, 24, 93, 0.55); }
+  .model-panel.panel-a { border-color: rgba(29, 78, 216, 0.2); }
+  .model-panel.panel-b { border-color: rgba(190, 24, 93, 0.2); }
+  .model-panel.panel-a:hover { border-color: rgba(29, 78, 216, 0.7); }
+  .model-panel.panel-b:hover { border-color: rgba(190, 24, 93, 0.7); }
   .model-panel.panel-a.selected { border-color: rgba(29, 78, 216, 0.9); box-shadow: var(--shadow-lg); }
   .model-panel.panel-b.selected { border-color: rgba(190, 24, 93, 0.9); box-shadow: var(--shadow-lg); }
 
@@ -481,11 +483,6 @@
 <!-- Main -->
 <div class="container">
 
-  <!-- Vote confirmation toast -->
-  <div class="vote-toast" id="vote-toast">
-    ✓ Your vote has been submitted. Please try with another query.
-  </div>
-
   <!-- Query selector -->
   <div class="query-section">
     <div class="query-row">
@@ -497,6 +494,11 @@
       <button class="btn btn-primary" onclick="startMatch()">Search</button>
       <button class="btn btn-outline" onclick="randomQuery()">Random</button>
     </div>
+  </div>
+
+  <!-- Vote confirmation toast -->
+  <div class="vote-toast" id="vote-toast">
+    ✓ Your vote has been submitted. Please try with another query.
   </div>
 
   <!-- Judge question -->
