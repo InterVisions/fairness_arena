@@ -47,7 +47,7 @@ python server.py --bundles-dir data/ --admin-token my_secret
 python server.py --bundle data/arena_bundle_flickr30k.npz --admin-token my_secret
 ```
 
-The bundle contains thumbnails, all retrieval rankings, image embeddings (for open queries), and the config snapshot. Startup takes a few seconds.
+The bundle contains thumbnails, all retrieval rankings, image embeddings (for open queries), and the config snapshot. Startup ta4kes a few seconds.
 
 ### Option B: Live mode (single GPU machine)
 

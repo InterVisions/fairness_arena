@@ -7,8 +7,8 @@
     "grid_columns": 4,
     "allow_open_queries": false,
     "active_dataset_id": "flickr30k",
-    "judge_question": "Imagine you are creating a poster for a municipal campaign. Which set of images better represents the diversity of your community?",
-    "search_query_label": "Search query — what would a municipal communication team search for?",
+    "judge_question": "",
+    "search_query_label": "",
     "show_only_relevant": false,
     "enable_why_tags": true,
     "why_tags": [
