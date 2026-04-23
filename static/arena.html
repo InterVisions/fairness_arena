@@ -175,8 +175,8 @@
 
   .comparison-divider {
     width: 2px;
-    background: black;
-    margin: 0 32px;
+    background: var(--border);
+    margin: 0 48px;
   }
 
   .model-panel {
@@ -189,8 +189,12 @@
     cursor: pointer;
   }
 
-  .model-panel:hover { border-color: var(--accent); }
-  .model-panel.selected { border-color: var(--accent); box-shadow: var(--shadow-lg); }
+  .model-panel.panel-a { border-color: rgba(29, 78, 216, 0.25); }
+  .model-panel.panel-b { border-color: rgba(190, 24, 93, 0.25); }
+  .model-panel.panel-a:hover { border-color: rgba(29, 78, 216, 0.85); }
+  .model-panel.panel-b:hover { border-color: rgba(190, 24, 93, 0.85); }
+  .model-panel.panel-a.selected { border-color: rgba(29, 78, 216, 0.85); box-shadow: var(--shadow-lg); }
+  .model-panel.panel-b.selected { border-color: rgba(190, 24, 93, 0.85); box-shadow: var(--shadow-lg); }
 
   .model-header {
     padding: 12px 16px;
@@ -760,10 +764,11 @@ async function startMatch() {
   // Set labels
   document.getElementById('label-left').textContent = match.left.label;
   document.getElementById('label-right').textContent = match.right.label;
-  document.getElementById('label-left').className = 'model-label ' +
-    (match.left.label === 'Model A' ? 'label-a' : 'label-b');
-  document.getElementById('label-right').className = 'model-label ' +
-    (match.right.label === 'Model A' ? 'label-a' : 'label-b');
+  const leftIsA = match.left.label === 'Model A';
+  document.getElementById('label-left').className = 'model-label ' + (leftIsA ? 'label-a' : 'label-b');
+  document.getElementById('label-right').className = 'model-label ' + (leftIsA ? 'label-b' : 'label-a');
+  document.getElementById('panel-left').className = 'model-panel ' + (leftIsA ? 'panel-a' : 'panel-b');
+  document.getElementById('panel-right').className = 'model-panel ' + (leftIsA ? 'panel-b' : 'panel-a');
 
   // Load images
   loadGrid('grid-left', match.left.indices, match.dataset_id);
