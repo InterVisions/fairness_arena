@@ -197,19 +197,18 @@
 
   .model-header {
     padding: 12px 16px;
-    font-weight: 600;
-    font-size: 0.9rem;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
   }
 
   .model-label {
-    padding: 3px 10px;
+    padding: 4px 14px;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 1.1rem;
     font-family: var(--mono);
+    font-weight: 600;
   }
 
   .label-a { background: #dbeafe; color: #1d4ed8; }
@@ -254,7 +253,7 @@
     border: 2px solid var(--border);
     border-radius: 8px;
     font-family: var(--font);
-    font-size: 0.9rem;
+    font-size: 1.1rem;
     font-weight: 600;
     cursor: pointer;
     background: white;
@@ -508,7 +507,6 @@
   <div class="comparison" id="comparison" style="display:none">
     <div class="model-panel" id="panel-left" onclick="selectPanel('left')">
       <div class="model-header">
-        <span>Left results</span>
         <span class="model-label label-a" id="label-left"></span>
       </div>
       <div class="image-grid" id="grid-left"></div>
@@ -516,7 +514,6 @@
     <div class="comparison-divider"></div>
     <div class="model-panel" id="panel-right" onclick="selectPanel('right')">
       <div class="model-header">
-        <span>Right results</span>
         <span class="model-label label-b" id="label-right"></span>
       </div>
       <div class="image-grid" id="grid-right"></div>
