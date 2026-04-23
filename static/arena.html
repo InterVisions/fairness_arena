@@ -662,11 +662,37 @@ function renderSuggestions(filter) {
 window.addEventListener('load', () => {
   const inp = document.getElementById('query-input');
   const box = document.getElementById('query-suggestions');
-  inp.addEventListener('focus', () => renderSuggestions(''));
-  inp.addEventListener('input', () => renderSuggestions(inp.value));
+  let activeIdx = -1;
+
+  function updateActive(idx) {
+    const items = box.querySelectorAll('.suggestion-item');
+    items.forEach(el => el.classList.remove('active'));
+    activeIdx = Math.max(-1, Math.min(idx, items.length - 1));
+    if (activeIdx >= 0) {
+      items[activeIdx].classList.add('active');
+      items[activeIdx].scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function openSuggestions() {
+    activeIdx = -1;
+    renderSuggestions(inp.value);
+  }
+
+  inp.addEventListener('focus', openSuggestions);
+  inp.addEventListener('click', openSuggestions);
+  inp.addEventListener('input', () => { activeIdx = -1; renderSuggestions(inp.value); });
   inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && inp.value.trim()) { box.classList.remove('open'); startMatch(); }
-    if (e.key === 'Escape') box.classList.remove('open');
+    const items = box.querySelectorAll('.suggestion-item');
+    if (e.key === 'ArrowDown') { e.preventDefault(); updateActive(activeIdx + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); updateActive(activeIdx - 1); }
+    else if (e.key === 'Enter') {
+      if (activeIdx >= 0 && items[activeIdx]) {
+        inp.value = items[activeIdx].textContent;
+      }
+      if (inp.value.trim()) { box.classList.remove('open'); startMatch(); }
+    }
+    else if (e.key === 'Escape') box.classList.remove('open');
   });
   document.addEventListener('click', e => {
     if (!e.target.closest('.query-input-wrap')) box.classList.remove('open');
