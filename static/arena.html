@@ -806,13 +806,31 @@ async function startMatch() {
 function loadGrid(gridId, indices, datasetId) {
   const grid = document.getElementById(gridId);
   grid.innerHTML = '';
-  for (const idx of indices) {
+  const eager = S.config.images_per_model || 12;
+
+  indices.forEach((idx, i) => {
     const img = document.createElement('img');
-    img.src = `/api/image/${idx}?v=${datasetId}`;
-    img.loading = 'lazy';
     img.alt = `Image ${idx}`;
+    if (i < eager) {
+      img.src = `/api/image/${idx}?v=${datasetId}`;
+    } else {
+      img.dataset.src = `/api/image/${idx}?v=${datasetId}`;
+    }
     grid.appendChild(img);
-  }
+  });
+
+  // Load deferred images as they scroll into view within the grid container
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting && e.target.dataset.src) {
+        e.target.src = e.target.dataset.src;
+        delete e.target.dataset.src;
+        observer.unobserve(e.target);
+      }
+    });
+  }, { root: grid, rootMargin: '120px' });
+
+  grid.querySelectorAll('img[data-src]').forEach(img => observer.observe(img));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
