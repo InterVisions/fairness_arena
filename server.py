@@ -511,6 +511,9 @@ async def startup():
         for key in ["arena", "models", "datasets", "dataset"]:
             if key not in CONFIG or CONFIG[key] == bundle_config.get(key):
                 CONFIG[key] = bundle_config.get(key, CONFIG.get(key))
+        # Pre-load text encoders if open queries are enabled
+        if CONFIG.get("arena", {}).get("allow_open_queries", False):
+            await ENGINE.preload_text_encoders()
     else:
         # ── Live mode: load models and dataset, needs GPU ────────────
         ENGINE.load_models(CONFIG.get("models", []))

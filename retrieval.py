@@ -198,9 +198,17 @@ class RetrievalEngine:
                 cfg["model_name"], pretrained=cfg.get("pretrained", "openai"), device=self.device
             )
             tokenizer = open_clip.get_tokenizer(cfg["model_name"])
+            # Discard vision tower — we only need text encoding
+            model.visual = None
             model.eval()
             self._text_encoders[model_id] = {"model": model, "tokenizer": tokenizer}
             log.info(f"✓ Text encoder for {model_id} loaded in {time.time() - t0:.1f}s")
+
+    async def preload_text_encoders(self):
+        """Pre-load text encoders for all bundle models to avoid first-query latency."""
+        for mid in self._bundle_model_ids:
+            await self.ensure_text_encoder(mid)
+        log.info(f"✓ All text encoders pre-loaded ({len(self._bundle_model_ids)} models)")
 
     @torch.no_grad()
     async def encode_query_async(self, model_id: str, query: str) -> torch.Tensor:
