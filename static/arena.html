@@ -345,6 +345,22 @@
   /* ── Loading state ───────────────────────────────── */
   .loading { opacity: 0.5; pointer-events: none; }
 
+  /* ── Vote toast ──────────────────────────────────── */
+  .vote-toast {
+    display: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--green);
+    border-radius: var(--radius);
+    padding: 16px 24px;
+    margin-bottom: 20px;
+    text-align: center;
+    box-shadow: var(--shadow);
+    font-size: 0.95rem;
+    color: var(--text);
+  }
+  .vote-toast.visible { display: block; }
+
   /* ── Mobile portrait: swipe carousel ────────────────── */
   .carousel-indicator {
     display: none;
@@ -463,6 +479,11 @@
 
 <!-- Main -->
 <div class="container">
+
+  <!-- Vote confirmation toast -->
+  <div class="vote-toast" id="vote-toast">
+    ✓ Your vote has been submitted. Please try with another query.
+  </div>
 
   <!-- Query selector -->
   <div class="query-section">
@@ -721,6 +742,7 @@ async function startMatch() {
   // Reset state
   S.selectedVote = null;
   S.selectedTags.clear();
+  document.getElementById('vote-toast').classList.remove('visible');
   document.querySelectorAll('.vote-btn').forEach(b => b.classList.remove('selected'));
   document.querySelectorAll('.model-panel').forEach(p => p.classList.remove('selected'));
   document.getElementById('why-section').classList.remove('visible');
@@ -879,6 +901,9 @@ async function submitVote() {
   document.getElementById('query-input').value = '';
   document.getElementById('why-section').classList.remove('visible');
   document.querySelectorAll('.vote-btn').forEach(b => b.classList.remove('selected'));
+
+  // Show confirmation toast
+  document.getElementById('vote-toast').classList.add('visible');
 
   // Refresh query list so open queries become available in the dropdown
   refreshQueries();
