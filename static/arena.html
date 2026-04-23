@@ -85,13 +85,47 @@
 
   .query-row { display: flex; gap: 10px; }
 
-  #query-input {
+  .query-input-wrap {
     flex: 1;
+    position: relative;
+  }
+
+  #query-input {
+    width: 100%;
     padding: 10px 14px;
     border: 1px solid var(--border);
     border-radius: 8px;
     font-family: var(--font);
     font-size: 0.9rem;
+  }
+
+  #query-suggestions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 50;
+    margin-top: 4px;
+  }
+
+  #query-suggestions.open { display: block; }
+
+  .suggestion-item {
+    padding: 9px 14px;
+    font-size: 0.88rem;
+    cursor: pointer;
+  }
+
+  .suggestion-item:hover, .suggestion-item.active {
+    background: var(--accent-light);
+    color: var(--accent);
   }
 
   .btn {
@@ -376,7 +410,7 @@
     .query-section { padding: 10px 12px; margin-bottom: 8px; }
     .query-section label { display: none; }
     .query-row { flex-wrap: wrap; }
-    #query-input { width: 100%; min-width: 0; max-width: 100%; }
+    .query-input-wrap { width: 100%; min-width: 0; max-width: 100%; }
     .vote-panel { padding: 12px 16px; }
     .vote-btn { padding: 10px 14px; font-size: 0.82rem; }
   }
@@ -434,8 +468,10 @@
   <div class="query-section">
     <div class="query-row">
       <label id="search-query-label"></label>
-      <input id="query-input" type="text" list="queries-list" placeholder="Select or type a query…" onkeydown="if(event.key==='Enter' && this.value.trim()) startMatch()" onchange="if(this.value.trim()) startMatch()">
-      <datalist id="queries-list"></datalist>
+      <div class="query-input-wrap">
+        <input id="query-input" type="text" autocomplete="off" placeholder="Select or type a query…">
+        <div id="query-suggestions"></div>
+      </div>
       <button class="btn btn-primary" onclick="startMatch()">Search</button>
       <button class="btn btn-outline" onclick="randomQuery()">Random</button>
     </div>
@@ -597,14 +633,45 @@ function carouselGo(side) {
 }
 
 function populateQueries(queries) {
-  const dl = document.getElementById('queries-list');
-  dl.innerHTML = '';
-  for (const q of queries) {
-    const opt = document.createElement('option');
-    opt.value = q;
-    dl.appendChild(opt);
-  }
+  S._queries = queries;
 }
+
+function renderSuggestions(filter) {
+  const box = document.getElementById('query-suggestions');
+  const list = filter
+    ? (S._queries || []).filter(q => q.toLowerCase().includes(filter.toLowerCase()))
+    : (S._queries || []);
+  if (!list.length) { box.classList.remove('open'); return; }
+  box.innerHTML = '';
+  list.forEach(q => {
+    const el = document.createElement('div');
+    el.className = 'suggestion-item';
+    el.textContent = q;
+    el.addEventListener('mousedown', e => {
+      e.preventDefault();
+      document.getElementById('query-input').value = q;
+      box.classList.remove('open');
+      startMatch();
+    });
+    box.appendChild(el);
+  });
+  box.classList.add('open');
+}
+
+// Wire up input events once DOM is ready
+window.addEventListener('load', () => {
+  const inp = document.getElementById('query-input');
+  const box = document.getElementById('query-suggestions');
+  inp.addEventListener('focus', () => renderSuggestions(''));
+  inp.addEventListener('input', () => renderSuggestions(inp.value));
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && inp.value.trim()) { box.classList.remove('open'); startMatch(); }
+    if (e.key === 'Escape') box.classList.remove('open');
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.query-input-wrap')) box.classList.remove('open');
+  });
+});
 
 async function refreshQueries() {
   const resp = await fetch('/api/config');
