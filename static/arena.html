@@ -222,13 +222,13 @@
     max-height: 480px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(0,0,0,0.15) transparent;
+    scrollbar-width: auto;
+    scrollbar-color: rgba(0,0,0,0.4) rgba(0,0,0,0.06);
   }
 
-  .image-grid::-webkit-scrollbar { width: 6px; }
-  .image-grid::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
-  .image-grid::-webkit-scrollbar-track { background: transparent; }
+  .image-grid::-webkit-scrollbar { width: 10px; }
+  .image-grid::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.4); border-radius: 5px; }
+  .image-grid::-webkit-scrollbar-track { background: rgba(0,0,0,0.06); border-radius: 5px; }
 
   .image-grid img {
     width: 100%;
