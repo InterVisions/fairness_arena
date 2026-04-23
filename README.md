@@ -47,7 +47,7 @@ python server.py --bundles-dir data/ --admin-token my_secret
 python server.py --bundle data/arena_bundle_flickr30k.npz --admin-token my_secret
 ```
 
-The bundle contains thumbnails, all retrieval rankings, image embeddings (for open queries), and the config snapshot. Startup ta4kes a few seconds.
+The bundle contains thumbnails, all retrieval rankings, image embeddings (for open queries), and the config snapshot. Startup takes a few seconds.
 
 ### Option B: Live mode (single GPU machine)
 
@@ -108,7 +108,8 @@ Browser ──────────► │   ├── Serve retrieval result
 
 | Flag | Default | Description |
 |---|---|---|
-| `--config` | `config/default_config.json` | Configuration file (defines models, datasets, queries) |
+| `--config` | `config/default_config.json` | Configuration file (defines models, datasets) |
+| `--queries` | `config/queries.txt` | Path to a text file with one query per line — these are baked into the bundle and shown in the UI dropdown |
 | `--dataset-id` | `None` | ID of a specific dataset to precompute (must match an entry in config `datasets`). Defaults to the active dataset |
 | `--all-datasets` | `False` | Precompute bundles for all datasets defined in config |
 | `--bundles-dir` | `data` | Output directory for bundle files |
@@ -119,15 +120,20 @@ Browser ──────────► │   ├── Serve retrieval result
 
 ## Configuration
 
-All settings are in `config/default_config.json` and can be changed live via the admin panel:
+Settings live in `config/default_config.json` (overridden at runtime by `config/active_config.json` if present, and editable via the admin panel):
 
-- **Elo parameters:** K-factor, initial rating
-- **Arena settings:** images per model, grid layout, predefined queries, open queries toggle
-- **Active dataset:** `arena.active_dataset_id` sets which dataset is loaded at startup
-- **Judge question:** the prompt shown to participants
-- **Why tags:** optional tags for qualitative feedback
+- **Elo parameters:** `elo_k_factor`, `elo_initial_rating`
+- **Arena layout:** `images_per_model`, `grid_columns`, `max_scroll_images`
+- **Active dataset:** `active_dataset_id` — which dataset is loaded at startup
+- **Search label:** `search_query_label` — text shown left of the query input (leave empty to hide)
+- **Judge question:** `judge_question` — prompt shown above the grids (leave empty to hide)
+- **Open queries:** `allow_open_queries` — if `true`, participants can type any free-text query (results are computed on-the-fly and cached in SQLite)
+- **Matchmaking:** `matchmaking` — `"uniform"` picks model pairs at random
+- **Why tags:** `enable_why_tags`, `why_tags` — optional qualitative feedback shown after a vote (15% of votes)
 - **Models:** list of CLIP models (open_clip backend)
 - **Datasets:** list of datasets under `"datasets"` key — each with an `id`, `name`, `source`, and source-specific fields (`hf_repo` / `folder_path`)
+
+**Queries** (the dropdown shown to participants) are **not** in the config JSON. They live in `config/queries.txt`, one query per line, and are baked into the bundle at precompute time. To add or change queries, edit `queries.txt` and re-run `precompute.py`.
 
 Example datasets config:
 
@@ -192,7 +198,9 @@ fairness-arena/
 ├── requirements.txt
 ├── arena.service
 ├── config/
-│   └── default_config.json
+│   ├── default_config.json   # Base configuration
+│   ├── active_config.json    # Runtime overrides (created by admin panel)
+│   └── queries.txt           # One query per line — baked into bundles at precompute time
 ├── data/
 │   ├── arena.db                      # Created at runtime (votes, ratings)
 │   ├── arena_bundle_flickr30k.npz    # Created by precompute.py (one per dataset)
