@@ -536,8 +536,6 @@
       <button class="vote-btn" data-vote="right" onclick="selectVote('right')">Right is fairer 👉</button>
     </div>
 
-    <button class="btn btn-primary" onclick="submitVote()">Submit vote</button>
-
     <div class="why-section" id="why-section">
       <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:8px">
         Why? (optional — select any that apply)
@@ -545,6 +543,8 @@
       <div class="why-tags" id="why-tags"></div>
       <textarea class="why-freetext" id="why-freetext" rows="2"
                 placeholder="Any other thoughts? (optional)"></textarea>
+      <br><br>
+      <button class="btn btn-primary" onclick="submitVote()">Submit vote</button>
     </div>
   </div>
 
@@ -818,11 +818,7 @@ function loadGrid(gridId, indices, datasetId) {
 //  Voting
 // ═══════════════════════════════════════════════════════════════════════
 function selectPanel(side) {
-  // Clicking a panel = voting for whichever model is on that side
-  // We store the vote as 'left' or 'right' internally, and resolve
-  // to model_a / model_b only at submit time. This avoids all the
-  // confusing A/B ↔ left/right mapping bugs.
-  selectVote(side);
+  // Clicking the grid panel is disabled — vote only via the buttons below.
 }
 
 function selectVote(choice) {
@@ -842,9 +838,11 @@ function selectVote(choice) {
     document.getElementById('panel-right').classList.add('selected');
   }
 
-  // Show why section 15% of the time
+  // Show why section 15% of the time; otherwise auto-submit immediately
   if (Math.random() < 0.15) {
     document.getElementById('why-section').classList.add('visible');
+  } else {
+    submitVote();
   }
 }
 
