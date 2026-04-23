@@ -85,15 +85,6 @@
 
   .query-row { display: flex; gap: 10px; }
 
-  #query-select {
-    flex: 1;
-    padding: 10px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-family: var(--font);
-    font-size: 0.9rem;
-  }
-
   #query-input {
     flex: 1;
     padding: 10px 14px;
@@ -101,7 +92,6 @@
     border-radius: 8px;
     font-family: var(--font);
     font-size: 0.9rem;
-    display: none;
   }
 
   .btn {
@@ -386,8 +376,7 @@
     .query-section { padding: 10px 12px; margin-bottom: 8px; }
     .query-section label { display: none; }
     .query-row { flex-wrap: wrap; }
-    #query-select { width: 100%; min-width: 0; max-width: 100%; }
-    #query-input { width: 100%; min-width: 0; }
+    #query-input { width: 100%; min-width: 0; max-width: 100%; }
     .vote-panel { padding: 12px 16px; }
     .vote-btn { padding: 10px 14px; font-size: 0.82rem; }
   }
@@ -445,8 +434,8 @@
   <div class="query-section">
     <div class="query-row">
       <label id="search-query-label"></label>
-      <select id="query-select" onchange="if(this.value){ document.getElementById('query-input').value=''; startMatch(); }"><option value=""></option></select>
-      <input id="query-input" type="text" placeholder="Type a custom query…" onkeydown="if(event.key==='Enter' && this.value.trim()) startMatch()">
+      <input id="query-input" type="text" list="queries-list" placeholder="Select or type a query…" onkeydown="if(event.key==='Enter' && this.value.trim()) startMatch()" onchange="if(this.value.trim()) startMatch()">
+      <datalist id="queries-list"></datalist>
       <button class="btn btn-primary" onclick="startMatch()">Search</button>
       <button class="btn btn-outline" onclick="randomQuery()">Random</button>
     </div>
@@ -528,13 +517,8 @@ async function init() {
   // Set search query label
   document.getElementById('search-query-label').textContent = S.config.search_query_label;
 
-  // Populate query dropdown
+  // Populate query datalist
   populateQueries(S.config.predefined_queries);
-
-  // Show/hide custom input
-  if (S.config.allow_open_queries) {
-    document.getElementById('query-input').style.display = 'block';
-  }
 
   // Set grid columns
   document.querySelectorAll('.image-grid').forEach(g => {
@@ -613,16 +597,13 @@ function carouselGo(side) {
 }
 
 function populateQueries(queries) {
-  const sel = document.getElementById('query-select');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">Select a query…</option>';
+  const dl = document.getElementById('queries-list');
+  dl.innerHTML = '';
   for (const q of queries) {
     const opt = document.createElement('option');
     opt.value = q;
-    opt.textContent = q;
-    sel.appendChild(opt);
+    dl.appendChild(opt);
   }
-  if (current) sel.value = current;
 }
 
 async function refreshQueries() {
@@ -635,14 +616,13 @@ async function refreshQueries() {
 function randomQuery() {
   const queries = S.config.predefined_queries || [];
   const q = queries[Math.floor(Math.random() * queries.length)];
-  document.getElementById('query-select').value = q;
+  document.getElementById('query-input').value = q;
   startMatch();
 }
 
 async function startMatch() {
-  const sel = document.getElementById('query-select');
   const inp = document.getElementById('query-input');
-  const query = inp.value.trim() || sel.value;
+  const query = inp.value.trim();
   if (!query) return;
 
   // Reset state
@@ -801,7 +781,7 @@ async function submitVote() {
   document.getElementById('vote-panel').style.display = 'none';
   document.getElementById('grid-left').innerHTML = '';
   document.getElementById('grid-right').innerHTML = '';
-  document.getElementById('query-select').value = '';
+  document.getElementById('query-input').value = '';
   document.getElementById('why-section').classList.remove('visible');
   document.querySelectorAll('.vote-btn').forEach(b => b.classList.remove('selected'));
 
