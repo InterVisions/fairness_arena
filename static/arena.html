@@ -446,7 +446,7 @@
     <div class="query-row">
       <label id="search-query-label"></label>
       <select id="query-select" onchange="if(this.value) startMatch()"><option value=""></option></select>
-      <input id="query-input" type="text" placeholder="Type a custom query…">
+      <input id="query-input" type="text" placeholder="Type a custom query…" onkeydown="if(event.key==='Enter' && this.value.trim()) startMatch()">
       <button class="btn btn-primary" onclick="startMatch()">Search</button>
       <button class="btn btn-outline" onclick="randomQuery()">Random</button>
     </div>
