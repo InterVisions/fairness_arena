@@ -182,19 +182,16 @@
   .model-panel {
     background: var(--bg-card);
     border-radius: var(--radius);
-    overflow: hidden;
+    overflow: clip;
     box-shadow: var(--shadow);
     border: 3px solid transparent;
     transition: border-color 0.2s;
-    cursor: pointer;
   }
 
-  .model-panel.panel-a { border-color: rgba(29, 78, 216, 0.25); }
-  .model-panel.panel-b { border-color: rgba(190, 24, 93, 0.25); }
-  .model-panel.panel-a:hover { border-color: rgba(29, 78, 216, 0.85); }
-  .model-panel.panel-b:hover { border-color: rgba(190, 24, 93, 0.85); }
-  .model-panel.panel-a.selected { border-color: rgba(29, 78, 216, 0.85); box-shadow: var(--shadow-lg); }
-  .model-panel.panel-b.selected { border-color: rgba(190, 24, 93, 0.85); box-shadow: var(--shadow-lg); }
+  .model-panel.panel-a:hover { border-color: rgba(29, 78, 216, 0.55); }
+  .model-panel.panel-b:hover { border-color: rgba(190, 24, 93, 0.55); }
+  .model-panel.panel-a.selected { border-color: rgba(29, 78, 216, 0.9); box-shadow: var(--shadow-lg); }
+  .model-panel.panel-b.selected { border-color: rgba(190, 24, 93, 0.9); box-shadow: var(--shadow-lg); }
 
   .model-header {
     padding: 12px 16px;
