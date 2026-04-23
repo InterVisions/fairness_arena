@@ -161,14 +161,12 @@
     overflow: hidden;
     box-shadow: var(--shadow);
     border: 3px solid transparent;
-    transition: border-color 0.2s, opacity 0.2s;
+    transition: border-color 0.2s;
     cursor: pointer;
-    opacity: 0.45;
   }
 
-  .comparison:hover .model-panel { opacity: 0.45; }
-  .comparison:hover .model-panel:hover { opacity: 1; border-color: var(--accent); }
-  .model-panel.selected { border-color: var(--accent); box-shadow: var(--shadow-lg); opacity: 1; }
+  .model-panel:hover { border-color: var(--accent); }
+  .model-panel.selected { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 
   .model-header {
     padding: 12px 16px;
