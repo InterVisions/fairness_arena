@@ -1,7 +1,7 @@
 from __future__ import annotations
 """
 Database layer — SQLite via aiosqlite for async access.
-Tables: participants, votes, elo_ratings, retrieval_cache
+Tables: participants, votes, elo_ratings, retrieval_cache, sessions
 """
 
 import json
@@ -25,6 +25,14 @@ async def init_db():
                 metadata TEXT DEFAULT '{}'
             );
 
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                started_at REAL NOT NULL,
+                stopped_at REAL,
+                created_at REAL NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS votes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 participant_id TEXT,
@@ -38,7 +46,8 @@ async def init_db():
                 images_a TEXT,  -- JSON list of image indices shown
                 images_b TEXT,
                 timestamp REAL,
-                session_meta TEXT DEFAULT '{}'
+                session_meta TEXT DEFAULT '{}',
+                session_id TEXT
             );
 
             CREATE TABLE IF NOT EXISTS elo_ratings (
@@ -60,6 +69,12 @@ async def init_db():
             );
         """)
         await db.commit()
+        # Migration: add session_id to existing votes tables that predate sessions feature
+        try:
+            await db.execute("ALTER TABLE votes ADD COLUMN session_id TEXT")
+            await db.commit()
+        except Exception:
+            pass  # column already exists
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -111,8 +126,8 @@ async def record_vote(vote: dict, k_factor: float = 32, initial_rating: float = 
         await db.execute(
             """INSERT INTO votes
                (participant_id, query, model_a, model_b, winner, position_a,
-                why_tags, why_freetext, images_a, images_b, timestamp, session_meta)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                why_tags, why_freetext, images_a, images_b, timestamp, session_meta, session_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 vote["participant_id"],
                 vote["query"],
@@ -126,6 +141,7 @@ async def record_vote(vote: dict, k_factor: float = 32, initial_rating: float = 
                 json.dumps(vote.get("images_b", [])),
                 time.time(),
                 json.dumps(vote.get("session_meta", {})),
+                vote.get("session_id"),
             )
         )
 
@@ -335,3 +351,59 @@ async def export_votes_csv() -> str:
             for r in rows:
                 writer.writerow(dict(r))
         return output.getvalue()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Sessions
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def create_session(name: str, started_at: float | None = None) -> dict:
+    """Create a new session and return it."""
+    session_id = str(uuid.uuid4())[:12]
+    now = time.time()
+    started_at = started_at or now
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO sessions (id, name, started_at, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, name, started_at, now)
+        )
+        await db.commit()
+    return {"id": session_id, "name": name, "started_at": started_at, "stopped_at": None, "created_at": now}
+
+
+async def stop_session(session_id: str) -> dict:
+    """Mark a session as stopped."""
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET stopped_at = ? WHERE id = ? AND stopped_at IS NULL",
+            (now, session_id)
+        )
+        await db.commit()
+    return {"id": session_id, "stopped_at": now}
+
+
+async def get_active_session() -> dict | None:
+    """Return the currently running session, or None."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM sessions WHERE stopped_at IS NULL ORDER BY created_at DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_sessions() -> list[dict]:
+    """Return all sessions with their vote counts."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT s.*, COUNT(v.id) as vote_count
+            FROM sessions s
+            LEFT JOIN votes v ON v.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+        """)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]

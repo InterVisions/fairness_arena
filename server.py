@@ -36,6 +36,7 @@ ENGINE = None  # RetrievalEngine instance
 ADMIN_TOKEN = "changeme"  # Set via --admin-token
 BUNDLE_PATH = None        # Explicit single-bundle path (legacy)
 BUNDLES_DIR = None        # Directory containing per-dataset bundles
+ACTIVE_SESSION = None     # Currently running workshop session (dict or None)
 
 app = FastAPI(title="Fairness Arena")
 
@@ -236,6 +237,9 @@ async def api_vote(request: Request):
     if vote.get("winner") not in ("A", "B", "tie"):
         raise HTTPException(400, "winner must be 'A', 'B', or 'tie'")
 
+    if ACTIVE_SESSION:
+        vote["session_id"] = ACTIVE_SESSION["id"]
+
     k = CONFIG["arena"].get("elo_k_factor", 32)
     initial = CONFIG["arena"].get("elo_initial_rating", 1500)
     result = await db.record_vote(vote, k_factor=k, initial_rating=initial)
@@ -322,6 +326,45 @@ async def api_admin_export(request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=fairness_arena_votes.csv"}
     )
+
+
+@app.get("/api/admin/sessions")
+async def api_admin_list_sessions(request: Request):
+    check_admin(request)
+    sessions = await db.get_sessions()
+    return {"sessions": sessions, "active_session": ACTIVE_SESSION}
+
+
+@app.post("/api/admin/sessions")
+async def api_admin_create_session(request: Request):
+    """Start a new named session. Stops any currently active session first."""
+    global ACTIVE_SESSION
+    check_admin(request)
+    body = await request.json()
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    started_at = body.get("started_at")  # optional UTC unix timestamp override
+
+    if ACTIVE_SESSION:
+        await db.stop_session(ACTIVE_SESSION["id"])
+
+    ACTIVE_SESSION = await db.create_session(name, started_at)
+    log.info(f"Session started: '{name}' (id={ACTIVE_SESSION['id']})")
+    return ACTIVE_SESSION
+
+
+@app.post("/api/admin/sessions/stop")
+async def api_admin_stop_session(request: Request):
+    """Stop the currently active session."""
+    global ACTIVE_SESSION
+    check_admin(request)
+    if not ACTIVE_SESSION:
+        raise HTTPException(400, "No active session")
+    result = await db.stop_session(ACTIVE_SESSION["id"])
+    log.info(f"Session stopped: '{ACTIVE_SESSION['name']}' (id={ACTIVE_SESSION['id']})")
+    ACTIVE_SESSION = None
+    return result
 
 
 @app.post("/api/admin/precompute")
@@ -448,10 +491,15 @@ def load_config(path: str) -> dict:
 
 
 async def startup():
-    global ENGINE, CONFIG
+    global ENGINE, CONFIG, ACTIVE_SESSION
 
     # Init database
     await db.init_db()
+
+    # Restore any session that was active before the server last stopped
+    ACTIVE_SESSION = await db.get_active_session()
+    if ACTIVE_SESSION:
+        log.info(f"Resuming active session: '{ACTIVE_SESSION['name']}' (id={ACTIVE_SESSION['id']})")
 
     bundle = active_bundle_path()
 

@@ -70,6 +70,39 @@
   #status { font-family: var(--mono); font-size: 0.75rem; color: var(--green); margin-bottom: 16px; }
   #status.error { color: var(--red); }
 
+  /* Session card */
+  .session-live-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green); flex-shrink: 0;
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+  .session-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 0; border-top: 1px solid var(--border);
+  }
+  .session-name { font-size: 0.85rem; font-weight: 500; }
+  .session-meta { font-size: 0.72rem; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
+  .btn-stop {
+    padding: 7px 16px; border-radius: 6px; border: 1px solid var(--red);
+    background: transparent; color: var(--red); cursor: pointer;
+    font-family: var(--font); font-size: 0.82rem; white-space: nowrap;
+  }
+  .btn-stop:hover { background: rgba(248,113,113,0.1); }
+  .btn-start {
+    padding: 8px 18px; border-radius: 6px; border: none;
+    background: var(--accent); color: white; cursor: pointer;
+    font-family: var(--font); font-weight: 600; font-size: 0.85rem;
+  }
+  .btn-start:hover { opacity: 0.9; }
+  .field-label { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 4px; }
+  .text-input {
+    padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-family: var(--font);
+    font-size: 0.85rem;
+  }
+
   /* Dataset cards */
   .dataset-list { display: flex; flex-direction: column; gap: 10px; }
   .dataset-item {
@@ -143,6 +176,43 @@
     <button class="danger" onclick="resetElo()">🗑️ Reset Elo ratings</button>
   </div>
 
+  <!-- Session management -->
+  <div class="card" style="margin-bottom:16px">
+    <h2>Workshop Session</h2>
+
+    <!-- Active session view -->
+    <div id="session-active-view" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span class="session-live-dot"></span>
+        <span style="font-weight:600;font-size:0.95rem" id="session-active-name"></span>
+        <span class="badge ready">live</span>
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-dim);font-family:var(--mono);margin-bottom:14px">
+        Started: <span id="session-active-started"></span>
+        &nbsp;·&nbsp; Votes this session: <strong id="session-active-votes" style="color:var(--text)">—</strong>
+      </div>
+      <button class="btn-stop" onclick="stopSession()">⏹ Stop Session</button>
+    </div>
+
+    <!-- Start session form -->
+    <div id="session-start-view">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+        <div>
+          <div class="field-label">Session name</div>
+          <input id="session-name-input" class="text-input" type="text" placeholder="e.g. Workshop Group A" style="width:220px">
+        </div>
+        <div>
+          <div class="field-label">Start time UTC (optional — leave blank for now)</div>
+          <input id="session-start-input" class="text-input" type="datetime-local">
+        </div>
+        <button class="btn-start" onclick="startSession()">▶ Start Session</button>
+      </div>
+    </div>
+
+    <!-- Past sessions -->
+    <div id="session-history"></div>
+  </div>
+
   <!-- Datasets -->
   <div class="card" style="margin-bottom:16px">
     <h2>Datasets</h2>
@@ -196,6 +266,7 @@
 
 <script>
 let TOKEN = '';
+let activeSession = null;
 
 function authenticate() {
   TOKEN = document.getElementById('token-input').value;
@@ -217,7 +288,76 @@ async function adminFetch(url, opts = {}) {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshStats(), loadDatasets()]);
+  await Promise.all([refreshStats(), loadDatasets(), loadSessions()]);
+}
+
+// ── Session management ────────────────────────────────────────────────────
+
+function fmtUTC(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toUTCString();
+}
+
+async function loadSessions() {
+  const data = await adminFetch('/api/admin/sessions');
+  if (!data) return;
+
+  activeSession = data.active_session;
+
+  const activeView = document.getElementById('session-active-view');
+  const startView  = document.getElementById('session-start-view');
+
+  if (activeSession) {
+    activeView.style.display = 'block';
+    startView.style.display  = 'none';
+    document.getElementById('session-active-name').textContent    = activeSession.name;
+    document.getElementById('session-active-started').textContent = fmtUTC(activeSession.started_at);
+    const sess = data.sessions.find(s => s.id === activeSession.id);
+    document.getElementById('session-active-votes').textContent   = sess ? sess.vote_count : '—';
+  } else {
+    activeView.style.display = 'none';
+    startView.style.display  = 'block';
+  }
+
+  // Past sessions list
+  const history = document.getElementById('session-history');
+  const past = data.sessions.filter(s => s.stopped_at != null);
+  if (!past.length) { history.innerHTML = ''; return; }
+
+  history.innerHTML = `<div style="font-size:0.72rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 8px">Past sessions</div>`;
+  past.forEach(s => {
+    history.innerHTML += `
+      <div class="session-row">
+        <div style="flex:1;min-width:0">
+          <div class="session-name">${s.name}</div>
+          <div class="session-meta">${fmtUTC(s.started_at)} → ${fmtUTC(s.stopped_at)}</div>
+        </div>
+        <span class="badge" style="background:rgba(99,102,241,0.15);color:#a5b4fc">${s.vote_count} votes</span>
+      </div>`;
+  });
+}
+
+async function startSession() {
+  const name = document.getElementById('session-name-input').value.trim();
+  if (!name) { alert('Please enter a session name.'); return; }
+
+  const startInput = document.getElementById('session-start-input').value;
+  const body = { name };
+  if (startInput) body.started_at = new Date(startInput).getTime() / 1000;
+
+  const data = await adminFetch('/api/admin/sessions', { method: 'POST', body: JSON.stringify(body) });
+  if (data) {
+    document.getElementById('session-name-input').value  = '';
+    document.getElementById('session-start-input').value = '';
+    await loadSessions();
+  }
+}
+
+async function stopSession() {
+  if (!activeSession) return;
+  if (!confirm(`Stop session "${activeSession.name}"?`)) return;
+  const data = await adminFetch('/api/admin/sessions/stop', { method: 'POST' });
+  if (data) await loadSessions();
 }
 
 async function refreshStats() {
@@ -376,7 +516,7 @@ async function precompute() {
 }
 
 // Auto-refresh every 10s
-setInterval(() => { if (TOKEN) refreshStats(); }, 10000);
+setInterval(() => { if (TOKEN) Promise.all([refreshStats(), loadSessions()]); }, 10000);
 </script>
 </body>
 </html>
