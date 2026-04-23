@@ -212,7 +212,7 @@ async def get_retrieval(model_id: str, query: str, n_images: int) -> dict:
     query_emb = await ENGINE.encode_query_async(model_id, query)
     img_embs = ENGINE.image_embeddings[model_id]
     import numpy as np
-    sims = (query_emb @ img_embs.T).squeeze(0).numpy()
+    sims = (query_emb @ img_embs.T).squeeze(0).detach().numpy()
     ranked_idx = np.argsort(sims)[::-1]
     indices = ranked_idx.tolist()
     similarities = [round(float(sims[i]), 4) for i in ranked_idx]
