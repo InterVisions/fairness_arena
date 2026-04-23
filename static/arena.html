@@ -770,8 +770,8 @@ async function startMatch() {
   // Load images
   loadGrid('grid-left', match.left.indices, match.dataset_id);
   loadGrid('grid-right', match.right.indices, match.dataset_id);
-  gridLeft.scrollTop = 0;
-  gridRight.scrollTop = 0;
+  document.getElementById('grid-left').scrollTop = 0;
+  document.getElementById('grid-right').scrollTop = 0;
 
   // Show judge question
   const jq = document.getElementById('judge-question');
