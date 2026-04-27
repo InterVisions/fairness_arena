@@ -590,6 +590,18 @@ def main():
     BUNDLE_PATH = args.bundle
     BUNDLES_DIR = args.bundles_dir
 
+    # Auto-detect bundles in data/ when no explicit flag was given
+    if not BUNDLE_PATH and not BUNDLES_DIR:
+        data_dir = Path(__file__).parent / "data"
+        legacy = data_dir / "arena_bundle.npz"
+        named = sorted(data_dir.glob("arena_bundle_*.npz")) if data_dir.exists() else []
+        if named:
+            BUNDLES_DIR = str(data_dir)
+            log.info(f"Auto-detected bundles dir: {data_dir} ({len(named)} bundle(s))")
+        elif legacy.exists():
+            BUNDLE_PATH = str(legacy)
+            log.info(f"Auto-detected bundle: {legacy}")
+
     # Load config
     active_config = Path(__file__).parent / "config" / "active_config.json"
     if active_config.exists():

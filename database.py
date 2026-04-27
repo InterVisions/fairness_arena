@@ -336,12 +336,27 @@ async def reset_elo(initial: float = 1500):
 
 
 async def export_votes_csv() -> str:
-    """Export all votes as CSV string."""
+    """Export all votes as CSV, with session_name and participant nickname joined in."""
     import csv
     import io
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM votes ORDER BY timestamp")
+        cursor = await db.execute("""
+            SELECT
+                v.id, v.timestamp, v.participant_id,
+                p.nickname,
+                v.query, v.model_a, v.model_b, v.winner, v.position_a,
+                v.why_tags, v.why_freetext,
+                v.images_a, v.images_b,
+                v.session_id,
+                s.name  AS session_name,
+                s.started_at AS session_started_at,
+                v.session_meta
+            FROM votes v
+            LEFT JOIN participants p ON p.id = v.participant_id
+            LEFT JOIN sessions     s ON s.id = v.session_id
+            ORDER BY v.timestamp
+        """)
         rows = await cursor.fetchall()
 
         output = io.StringIO()
