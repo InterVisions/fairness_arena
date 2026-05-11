@@ -1,9 +1,11 @@
 from __future__ import annotations
 """
 Database layer — SQLite via aiosqlite for async access.
-Tables: participants, votes, elo_ratings, retrieval_cache, sessions
+Tables: participants, votes, elo_ratings, retrieval_cache, sessions, workshops
 """
 
+import csv
+import io
 import json
 import math
 import time
@@ -12,6 +14,33 @@ import aiosqlite
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "arena.db"
+
+OCCUPATION_KEYWORDS = [
+    'nurse', 'doctor', 'ceo', 'teacher', 'engineer', 'scientist',
+    'lawyer', 'manager', 'pilot', 'chef', 'programmer', 'developer',
+]
+TRAIT_KEYWORDS = [
+    'strong', 'intelligent', 'beautiful', 'trustworthy', 'dangerous',
+    'competent', 'aggressive', 'kind', 'criminal',
+]
+ACTION_KEYWORDS = [
+    'protesting', 'leading', 'cooking', 'coding', 'teaching', 'caring',
+    'running', 'playing', 'working', 'studying',
+]
+
+
+def categorize_query(query: str) -> str:
+    q = query.lower()
+    for kw in OCCUPATION_KEYWORDS:
+        if kw in q:
+            return 'occupation'
+    for kw in TRAIT_KEYWORDS:
+        if kw in q:
+            return 'trait'
+    for kw in ACTION_KEYWORDS:
+        if kw in q:
+            return 'action'
+    return 'custom'
 
 
 async def init_db():
@@ -33,6 +62,17 @@ async def init_db():
                 created_at REAL NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS workshops (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                location TEXT,
+                date TEXT,
+                community_context TEXT,
+                facilitator TEXT,
+                notes TEXT,
+                created_at REAL
+            );
+
             CREATE TABLE IF NOT EXISTS votes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 participant_id TEXT,
@@ -47,7 +87,9 @@ async def init_db():
                 images_b TEXT,
                 timestamp REAL,
                 session_meta TEXT DEFAULT '{}',
-                session_id TEXT
+                session_id TEXT,
+                query_category TEXT,
+                workshop_id INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS elo_ratings (
@@ -69,12 +111,17 @@ async def init_db():
             );
         """)
         await db.commit()
-        # Migration: add session_id to existing votes tables that predate sessions feature
-        try:
-            await db.execute("ALTER TABLE votes ADD COLUMN session_id TEXT")
-            await db.commit()
-        except Exception:
-            pass  # column already exists
+        # Migrations for columns added after initial schema
+        for col, defn in [
+            ("session_id", "TEXT"),
+            ("query_category", "TEXT"),
+            ("workshop_id", "INTEGER"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE votes ADD COLUMN {col} {defn}")
+                await db.commit()
+            except Exception:
+                pass  # column already exists
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -122,12 +169,14 @@ async def get_ratings() -> dict:
 async def record_vote(vote: dict, k_factor: float = 32, initial_rating: float = 1500):
     """Record a vote and update Elo ratings."""
     async with aiosqlite.connect(DB_PATH) as db:
+        query_cat = categorize_query(vote.get("query", ""))
         # Insert vote
         await db.execute(
             """INSERT INTO votes
                (participant_id, query, model_a, model_b, winner, position_a,
-                why_tags, why_freetext, images_a, images_b, timestamp, session_meta, session_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                why_tags, why_freetext, images_a, images_b, timestamp, session_meta,
+                session_id, query_category, workshop_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 vote["participant_id"],
                 vote["query"],
@@ -142,6 +191,8 @@ async def record_vote(vote: dict, k_factor: float = 32, initial_rating: float = 
                 time.time(),
                 json.dumps(vote.get("session_meta", {})),
                 vote.get("session_id"),
+                query_cat,
+                vote.get("workshop_id"),
             )
         )
 
@@ -422,3 +473,99 @@ async def get_sessions() -> list[dict]:
         """)
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Workshops
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def create_workshop(
+    name: str,
+    location: str = "",
+    date: str = "",
+    community_context: str = "",
+    facilitator: str = "",
+    notes: str = "",
+) -> dict:
+    """Insert a new workshop and return it with its generated id."""
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """INSERT INTO workshops (name, location, date, community_context, facilitator, notes, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (name, location, date, community_context, facilitator, notes, now),
+        )
+        workshop_id = cursor.lastrowid
+        await db.commit()
+    return {
+        "id": workshop_id,
+        "name": name,
+        "location": location,
+        "date": date,
+        "community_context": community_context,
+        "facilitator": facilitator,
+        "notes": notes,
+        "created_at": now,
+    }
+
+
+async def get_workshops() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT w.*, COUNT(v.id) as vote_count
+            FROM workshops w
+            LEFT JOIN votes v ON v.workshop_id = w.id
+            GROUP BY w.id
+            ORDER BY w.created_at DESC
+        """)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_workshop(workshop_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM workshops WHERE id = ?", (workshop_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Analysis export
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def export_for_analysis() -> str:
+    """Return CSV for analysis: votes joined with workshop info."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT
+                v.id            AS vote_id,
+                v.participant_id,
+                v.query,
+                v.query_category,
+                v.model_a,
+                v.model_b,
+                v.winner,
+                v.position_a,
+                CASE WHEN v.position_a = 'left'  THEN v.images_a ELSE v.images_b END AS ranking_left,
+                CASE WHEN v.position_a = 'left'  THEN v.images_b ELSE v.images_a END AS ranking_right,
+                v.workshop_id,
+                w.name              AS workshop_name,
+                w.community_context,
+                v.session_id,
+                v.timestamp
+            FROM votes v
+            LEFT JOIN workshops w ON w.id = v.workshop_id
+            ORDER BY v.timestamp
+        """)
+        rows = await cursor.fetchall()
+
+    output = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(output, fieldnames=dict(rows[0]).keys())
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(dict(r))
+    return output.getvalue()

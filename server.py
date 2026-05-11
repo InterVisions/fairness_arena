@@ -37,6 +37,29 @@ ADMIN_TOKEN = "changeme"  # Set via --admin-token
 BUNDLE_PATH = None        # Explicit single-bundle path (legacy)
 BUNDLES_DIR = None        # Directory containing per-dataset bundles
 ACTIVE_SESSION = None     # Currently running workshop session (dict or None)
+ACTIVE_WORKSHOP = None    # Currently active workshop for data collection (dict or None)
+
+# ── AIES26 Model Registry ─────────────────────────────────────────────────
+MODEL_IDS = {
+    "M1": "openai/clip-vit-base-patch16",
+    "M2": "laion/CLIP-ViT-B-16-laion2B-s34B-b88K",
+    "M3": "google/siglip-base-patch16-224",
+    "M4": "google/siglip2-base-patch16-224",
+    "M5": "M2_SANER",
+    "M6": "M2_NeuralInt",
+    "M7": "laion/CLIP-ViT-L-14-laion2B-s32B-b82K",
+}
+
+# Each tuple is (model_a_id, model_b_id) using keys from MODEL_IDS
+ALLOWED_PAIRS = [
+    ("M1", "M2"),  # data source comparison
+    ("M1", "M3"),  # objective comparison
+    ("M3", "M4"),  # SigLIP design comparison
+    ("M2", "M5"),  # text debiasing
+    ("M2", "M6"),  # image debiasing
+    ("M5", "M6"),  # debiasing method comparison
+    ("M2", "M7"),  # scale comparison
+]
 
 app = FastAPI(title="Fairness Arena")
 
@@ -147,7 +170,8 @@ async def api_config():
 @app.get("/api/match")
 async def api_match(query: str, participant_id: str = ""):
     """
-    Get a new match: select two random models, retrieve results, return image grids.
+    Get a new match: select two models, retrieve results, return image grids.
+    When all loaded models are in MODEL_IDS, restricts selection to ALLOWED_PAIRS.
     Randomises left/right assignment.
     """
     enabled_models = ENGINE.loaded_models()
@@ -156,8 +180,22 @@ async def api_match(query: str, participant_id: str = ""):
     if len(enabled_models) < 2:
         raise HTTPException(400, "Need at least 2 enabled models")
 
-    # Select two models (uniform random for now)
-    model_a, model_b = random.sample(enabled_models, 2)
+    # Build reverse lookup: model_id_string → mnemonic key (M1..M7)
+    id_to_key = {v: k for k, v in MODEL_IDS.items()}
+    loaded_keys = {id_to_key[m] for m in enabled_models if m in id_to_key}
+
+    # Use allowed pairs when at least 2 loaded models are in the AIES26 registry
+    if len(loaded_keys) >= 2:
+        valid_pairs = [
+            (MODEL_IDS[a], MODEL_IDS[b])
+            for a, b in ALLOWED_PAIRS
+            if a in loaded_keys and b in loaded_keys
+        ]
+        if not valid_pairs:
+            raise HTTPException(400, "No valid allowed pairs available for loaded models")
+        model_a, model_b = random.choice(valid_pairs)
+    else:
+        model_a, model_b = random.sample(enabled_models, 2)
 
     # Randomise left/right position
     if random.random() < 0.5:
@@ -239,6 +277,8 @@ async def api_vote(request: Request):
 
     if ACTIVE_SESSION:
         vote["session_id"] = ACTIVE_SESSION["id"]
+    if ACTIVE_WORKSHOP:
+        vote["workshop_id"] = ACTIVE_WORKSHOP["id"]
 
     k = CONFIG["arena"].get("elo_k_factor", 32)
     initial = CONFIG["arena"].get("elo_initial_rating", 1500)
@@ -326,6 +366,246 @@ async def api_admin_export(request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=fairness_arena_votes.csv"}
     )
+
+
+# Canonical pairs — (model_a, model_b). winner=="A" always means model_a won,
+# regardless of which side it appeared on (position is randomized per match).
+_ALLOWED_PAIRS = [
+    ("openai/clip-vit-base-patch16",           "laion/CLIP-ViT-B-16-laion2B-s34B-b88K"),
+    ("openai/clip-vit-base-patch16",           "google/siglip-base-patch16-224"),
+    ("google/siglip-base-patch16-224",         "google/siglip2-base-patch16-224"),
+    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "M2_SANER"),
+    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "M2_NeuralInt"),
+    ("M2_SANER",                               "M2_NeuralInt"),
+    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "laion/CLIP-ViT-L-14-laion2B-s32B-b82K"),
+]
+_PAIR_SET = set(_ALLOWED_PAIRS)
+
+
+async def _load_votes_and_workshops():
+    """Fetch all votes joined with workshop info as a list of dicts."""
+    import csv, io
+    csv_str = await db.export_for_analysis()
+    return list(csv.DictReader(io.StringIO(csv_str)))
+
+
+def _empty_bucket():
+    return {"n_a": 0, "n_b": 0, "n_tie": 0}
+
+
+def _tally(rows, group_fn):
+    """
+    Key: "model_a vs model_b" (full IDs, matching JS PAIR_META).
+    winner=="A" = model_a preferred, winner=="B" = model_b preferred.
+    Position randomization is already baked in by how votes are recorded.
+    """
+    from collections import defaultdict
+    out = defaultdict(lambda: defaultdict(_empty_bucket))
+    for v in rows:
+        ma, mb = v.get("model_a", ""), v.get("model_b", "")
+        if (ma, mb) not in _PAIR_SET:
+            continue
+        pair_key = f"{ma} vs {mb}"
+        group    = group_fn(v)
+        winner   = v.get("winner", "")
+        bucket   = "n_a" if winner == "A" else ("n_b" if winner == "B" else "n_tie")
+        out[pair_key][group][bucket] += 1
+    return {k: dict(v) for k, v in out.items()}
+
+
+
+@app.get("/results")
+async def results_page():
+    return FileResponse(str(STATIC_DIR / "results.html"))
+
+
+@app.get("/api/live_results")
+async def api_live_results():
+    """Win rates per model pair x workshop. Public, no auth."""
+    import time
+    from collections import defaultdict, OrderedDict
+
+    rows = await _load_votes_and_workshops()
+
+    workshops_seen: dict = OrderedDict()
+    for v in rows:
+        wid = v.get("workshop_id", "")
+        if wid and wid not in workshops_seen:
+            workshops_seen[wid] = {
+                "id":                wid,
+                "name":              v.get("workshop_name") or f"Workshop {wid}",
+                "community_context": v.get("community_context") or "",
+            }
+
+    workshops  = list(workshops_seen.values())
+    cell_data  = _tally(rows, lambda v: v.get("workshop_id") or "none")
+
+    overall: dict = defaultdict(_empty_bucket)
+    for v in rows:
+        ma, mb = v.get("model_a", ""), v.get("model_b", "")
+        if (ma, mb) not in _PAIR_SET:
+            continue
+        winner = v.get("winner", "")
+        bucket = "n_a" if winner == "A" else ("n_b" if winner == "B" else "n_tie")
+        overall[f"{ma} vs {mb}"][bucket] += 1
+
+    return {
+        "workshops":       workshops,
+        "data":            cell_data,
+        "overall":         dict(overall),
+        "total_votes":     len(rows),
+        "last_updated":    time.time(),
+        "active_workshop": ACTIVE_WORKSHOP,
+    }
+
+
+@app.get("/api/live_results/by_query")
+async def api_live_results_by_query():
+    """Win rates per model pair x query_category. Public, no auth."""
+    import time
+
+    rows      = await _load_votes_and_workshops()
+    cats      = sorted({v.get("query_category") or "unknown" for v in rows})
+    cell_data = _tally(rows, lambda v: v.get("query_category") or "unknown")
+
+    return {
+        "categories":   cats,
+        "data":         cell_data,
+        "total_votes":  len(rows),
+        "last_updated": time.time(),
+    }
+
+
+@app.get("/api/live_results/full")
+async def api_live_results_full():
+    """Win rates per pair x query x session. Pairs are normalized; sessions from DB table."""
+    import time
+    import aiosqlite
+    from collections import defaultdict
+
+    async with aiosqlite.connect(str(db.DB_PATH)) as conn:
+        conn.row_factory = aiosqlite.Row
+
+        cur = await conn.execute("SELECT id, name FROM sessions ORDER BY started_at")
+        sessions = [{"id": r["id"], "name": r["name"]} for r in await cur.fetchall()]
+
+        cur = await conn.execute(
+            "SELECT model_a, model_b, winner, query, session_id FROM votes ORDER BY timestamp"
+        )
+        votes = [dict(r) for r in await cur.fetchall()]
+
+    model_names = {m["id"]: m["name"] for m in CONFIG.get("models", [])}
+
+    def norm(ma, mb):
+        """Return canonical (ma, mb, flipped). Alphabetical order."""
+        return (ma, mb, False) if ma <= mb else (mb, ma, True)
+
+    queries_set: set = set()
+    queries_list: list = []
+    tally: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(
+        lambda: {"n_a": 0, "n_b": 0, "n_tie": 0}
+    )))
+
+    for v in votes:
+        ma_raw, mb_raw = v["model_a"] or "", v["model_b"] or ""
+        if not ma_raw or not mb_raw:
+            continue
+        ma, mb, flipped = norm(ma_raw, mb_raw)
+        pair_key = f"{ma} vs {mb}"
+        q   = v["query"] or "unknown"
+        sid = v["session_id"] or "none"
+
+        winner = v["winner"] or ""
+        if flipped and winner in ("A", "B"):
+            winner = "B" if winner == "A" else "A"
+
+        bucket = "n_a" if winner == "A" else ("n_b" if winner == "B" else "n_tie")
+        tally[pair_key][q][sid][bucket] += 1
+
+        if q not in queries_set:
+            queries_list.append(q)
+            queries_set.add(q)
+
+    queries_list.sort()
+    pairs = sorted(tally.keys())
+
+    return {
+        "sessions":     sessions,
+        "queries":      queries_list,
+        "pairs":        pairs,
+        "model_names":  model_names,
+        "data":         {pk: {q: dict(ws) for q, ws in qm.items()} for pk, qm in tally.items()},
+        "total_votes":  len(votes),
+        "last_updated": time.time(),
+        "active_session": ACTIVE_SESSION,
+    }
+
+
+@app.get("/api/export_analysis")
+async def api_export_analysis(request: Request):
+    """Export votes joined with workshop metadata for analysis scripts."""
+    check_admin(request)
+    csv_data = await db.export_for_analysis()
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=fairness_arena_analysis.csv"}
+    )
+
+
+# ── Workshop endpoints ─────────────────────────────────────────────────────
+
+@app.post("/api/workshop/create")
+async def api_workshop_create(request: Request):
+    """Create a new workshop record and return it (including its id)."""
+    check_admin(request)
+    body = await request.json()
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    workshop = await db.create_workshop(
+        name=name,
+        location=body.get("location", ""),
+        date=body.get("date", ""),
+        community_context=body.get("community_context", ""),
+        facilitator=body.get("facilitator", ""),
+        notes=body.get("notes", ""),
+    )
+    log.info(f"Workshop created: '{name}' (id={workshop['id']})")
+    return workshop
+
+
+@app.post("/api/workshop/set_active")
+async def api_workshop_set_active(request: Request):
+    """Set the active workshop. All subsequent votes will link to this workshop_id."""
+    global ACTIVE_WORKSHOP
+    check_admin(request)
+    body = await request.json()
+    workshop_id = body.get("workshop_id")
+    if workshop_id is None:
+        raise HTTPException(400, "workshop_id is required")
+    workshop = await db.get_workshop(int(workshop_id))
+    if workshop is None:
+        raise HTTPException(404, f"Workshop {workshop_id} not found")
+    ACTIVE_WORKSHOP = workshop
+    log.info(f"Active workshop set: '{workshop['name']}' (id={workshop['id']})")
+    return {"status": "ok", "active_workshop": ACTIVE_WORKSHOP}
+
+
+@app.post("/api/workshop/clear_active")
+async def api_workshop_clear_active(request: Request):
+    """Unset the active workshop (stop linking votes to a workshop)."""
+    global ACTIVE_WORKSHOP
+    check_admin(request)
+    ACTIVE_WORKSHOP = None
+    return {"status": "ok", "active_workshop": None}
+
+
+@app.get("/api/workshop/list")
+async def api_workshop_list(request: Request):
+    check_admin(request)
+    workshops = await db.get_workshops()
+    return {"workshops": workshops, "active_workshop": ACTIVE_WORKSHOP}
 
 
 @app.get("/api/admin/sessions")
@@ -491,7 +771,7 @@ def load_config(path: str) -> dict:
 
 
 async def startup():
-    global ENGINE, CONFIG, ACTIVE_SESSION
+    global ENGINE, CONFIG, ACTIVE_SESSION, ACTIVE_WORKSHOP
 
     # Init database
     await db.init_db()
