@@ -20,7 +20,8 @@
       "More natural / realistic",
       "Better overall representation"
     ],
-    "matchmaking": "uniform"
+    "matchmaking": "uniform",
+    "allowed_pairs": []
   },
   "models": [
     {

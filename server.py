@@ -39,28 +39,6 @@ BUNDLES_DIR = None        # Directory containing per-dataset bundles
 ACTIVE_SESSION = None     # Currently running workshop session (dict or None)
 ACTIVE_WORKSHOP = None    # Currently active workshop for data collection (dict or None)
 
-# ── AIES26 Model Registry ─────────────────────────────────────────────────
-MODEL_IDS = {
-    "M1": "openai/clip-vit-base-patch16",
-    "M2": "laion/CLIP-ViT-B-16-laion2B-s34B-b88K",
-    "M3": "google/siglip-base-patch16-224",
-    "M4": "google/siglip2-base-patch16-224",
-    "M5": "M2_SANER",
-    "M6": "M2_NeuralInt",
-    "M7": "laion/CLIP-ViT-L-14-laion2B-s32B-b82K",
-}
-
-# Each tuple is (model_a_id, model_b_id) using keys from MODEL_IDS
-ALLOWED_PAIRS = [
-    ("M1", "M2"),  # data source comparison
-    ("M1", "M3"),  # objective comparison
-    ("M3", "M4"),  # SigLIP design comparison
-    ("M2", "M5"),  # text debiasing
-    ("M2", "M6"),  # image debiasing
-    ("M5", "M6"),  # debiasing method comparison
-    ("M2", "M7"),  # scale comparison
-]
-
 app = FastAPI(title="Fairness Arena")
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -180,17 +158,10 @@ async def api_match(query: str, participant_id: str = ""):
     if len(enabled_models) < 2:
         raise HTTPException(400, "Need at least 2 enabled models")
 
-    # Build reverse lookup: model_id_string → mnemonic key (M1..M7)
-    id_to_key = {v: k for k, v in MODEL_IDS.items()}
-    loaded_keys = {id_to_key[m] for m in enabled_models if m in id_to_key}
-
-    # Use allowed pairs when at least 2 loaded models are in the AIES26 registry
-    if len(loaded_keys) >= 2:
-        valid_pairs = [
-            (MODEL_IDS[a], MODEL_IDS[b])
-            for a, b in ALLOWED_PAIRS
-            if a in loaded_keys and b in loaded_keys
-        ]
+    allowed_pairs = [tuple(p) for p in CONFIG.get("arena", {}).get("allowed_pairs", [])]
+    if allowed_pairs:
+        enabled_set = set(enabled_models)
+        valid_pairs = [(a, b) for a, b in allowed_pairs if a in enabled_set and b in enabled_set]
         if not valid_pairs:
             raise HTTPException(400, "No valid allowed pairs available for loaded models")
         model_a, model_b = random.choice(valid_pairs)
@@ -368,20 +339,6 @@ async def api_admin_export(request: Request):
     )
 
 
-# Canonical pairs — (model_a, model_b). winner=="A" always means model_a won,
-# regardless of which side it appeared on (position is randomized per match).
-_ALLOWED_PAIRS = [
-    ("openai/clip-vit-base-patch16",           "laion/CLIP-ViT-B-16-laion2B-s34B-b88K"),
-    ("openai/clip-vit-base-patch16",           "google/siglip-base-patch16-224"),
-    ("google/siglip-base-patch16-224",         "google/siglip2-base-patch16-224"),
-    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "M2_SANER"),
-    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "M2_NeuralInt"),
-    ("M2_SANER",                               "M2_NeuralInt"),
-    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "laion/CLIP-ViT-L-14-laion2B-s32B-b82K"),
-]
-_PAIR_SET = set(_ALLOWED_PAIRS)
-
-
 async def _load_votes_and_workshops():
     """Fetch all votes joined with workshop info as a list of dicts."""
     import csv, io
@@ -400,10 +357,11 @@ def _tally(rows, group_fn):
     Position randomization is already baked in by how votes are recorded.
     """
     from collections import defaultdict
+    pair_set = {tuple(p) for p in CONFIG.get("arena", {}).get("allowed_pairs", [])}
     out = defaultdict(lambda: defaultdict(_empty_bucket))
     for v in rows:
         ma, mb = v.get("model_a", ""), v.get("model_b", "")
-        if (ma, mb) not in _PAIR_SET:
+        if pair_set and (ma, mb) not in pair_set:
             continue
         pair_key = f"{ma} vs {mb}"
         group    = group_fn(v)
