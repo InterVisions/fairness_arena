@@ -149,7 +149,7 @@ async def api_config():
 async def api_match(query: str, participant_id: str = ""):
     """
     Get a new match: select two models, retrieve results, return image grids.
-    When all loaded models are in MODEL_IDS, restricts selection to ALLOWED_PAIRS.
+    When arena.allowed_pairs is configured, restricts selection to those pairs.
     Randomises left/right assignment.
     """
     enabled_models = ENGINE.loaded_models()
@@ -398,10 +398,11 @@ async def api_live_results():
     workshops  = list(workshops_seen.values())
     cell_data  = _tally(rows, lambda v: v.get("workshop_id") or "none")
 
+    pair_set = {tuple(p) for p in CONFIG.get("arena", {}).get("allowed_pairs", [])}
     overall: dict = defaultdict(_empty_bucket)
     for v in rows:
         ma, mb = v.get("model_a", ""), v.get("model_b", "")
-        if (ma, mb) not in _PAIR_SET:
+        if pair_set and (ma, mb) not in pair_set:
             continue
         winner = v.get("winner", "")
         bucket = "n_a" if winner == "A" else ("n_b" if winner == "B" else "n_tie")
