@@ -43,7 +43,7 @@ h2 {
 .last-update  { font-size: 11px; color: #4b5563; margin-left: auto; }
 
 /* ---- Table ---- */
-table { border-collapse: collapse; }
+table { border-collapse: collapse; table-layout: fixed; width: 100%; }
 
 /* Sticky query label column */
 .th-query-corner, .td-query {
@@ -80,15 +80,15 @@ table { border-collapse: collapse; }
   text-align: center;
   font-size: 10px; color: #9ca3af; font-weight: 500;
   padding: 3px 4px 6px;
-  white-space: nowrap;
+  overflow: hidden;
   border-bottom: 2px solid #4b5563;
-  min-width: 90px;
+  width: 100px;
 }
 .th-session.first { border-left: 2px solid #4b5563; }
 .th-session.all   { color: #6b7280; font-style: italic; }
 
 /* Data cells */
-.td-cell { padding: 4px 4px; vertical-align: middle; min-width: 90px; }
+.td-cell { padding: 4px 4px; vertical-align: middle; width: 100px; }
 .td-cell.first { border-left: 2px solid #374151; }
 
 /* Stacked bar */
