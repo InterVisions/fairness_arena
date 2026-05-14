@@ -611,8 +611,18 @@ const S = {
   selectedVote: null,
   selectedTags: new Set(),
   totalVotes: 0,
-  _queryKey: null,   // EN canonical key of the currently selected predefined query
+  _queryKey: null,        // EN canonical key of the currently selected predefined query
+  openQueryLabels: {},    // {en_key: {es: "...", ca: "..."}} for approved open queries
 };
+
+// Display label for a query key — predefined i18n first, then open query labels, then raw key.
+function queryDisplayLabel(k) {
+  const i18nLabel = I18n.queryLabel(k);
+  if (i18nLabel !== k) return i18nLabel;
+  const labels = S.openQueryLabels[k];
+  if (labels) return labels[I18n.currentLang()] || k;
+  return k;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Init
@@ -630,7 +640,7 @@ async function init() {
     populateQueries(S.config.predefined_queries || []);
     // Update query input if a predefined query is selected
     if (S._queryKey) {
-      document.getElementById('query-input').value = I18n.queryLabel(S._queryKey);
+      document.getElementById('query-input').value = queryDisplayLabel(S._queryKey);
     }
     // Update vote count display
     document.getElementById('vote-count-display').textContent =
@@ -640,6 +650,7 @@ async function init() {
   // Load config
   const resp = await fetch('/api/config');
   S.config = await resp.json();
+  S.openQueryLabels = S.config.open_query_labels || {};
 
   // Set search query label
   document.getElementById('search-query-label').textContent = S.config.search_query_label;
@@ -731,19 +742,19 @@ function renderSuggestions(filter) {
   const box = document.getElementById('query-suggestions');
   const keys = S._queries || [];
   const list = filter
-    ? keys.filter(k => I18n.queryLabel(k).toLowerCase().includes(filter.toLowerCase()))
+    ? keys.filter(k => queryDisplayLabel(k).toLowerCase().includes(filter.toLowerCase()))
     : keys;
   if (!list.length) { box.classList.remove('open'); return; }
   box.innerHTML = '';
   list.forEach(k => {
     const el = document.createElement('div');
     el.className = 'suggestion-item';
-    el.textContent = I18n.queryLabel(k);
+    el.textContent = queryDisplayLabel(k);
     el.dataset.key = k;
     el.addEventListener('mousedown', e => {
       e.preventDefault();
       S._queryKey = k;
-      document.getElementById('query-input').value = I18n.queryLabel(k);
+      document.getElementById('query-input').value = queryDisplayLabel(k);
       box.classList.remove('open');
       startMatch();
     });
@@ -803,6 +814,7 @@ async function refreshQueries() {
   const resp = await fetch('/api/config');
   const cfg = await resp.json();
   S.config = cfg;
+  S.openQueryLabels = cfg.open_query_labels || {};
   populateQueries(cfg.predefined_queries || []);
 }
 
@@ -811,7 +823,7 @@ function randomQuery() {
   if (!keys.length) return;
   const k = keys[Math.floor(Math.random() * keys.length)];
   S._queryKey = k;
-  document.getElementById('query-input').value = I18n.queryLabel(k);
+  document.getElementById('query-input').value = queryDisplayLabel(k);
   startMatch();
 }
 

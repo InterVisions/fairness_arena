@@ -498,20 +498,21 @@ async def get_translation(original_text: str, source_lang: str) -> dict | None:
         return dict(row) if row else None
 
 
-async def save_translation(original_text: str, source_lang: str, translation: str) -> dict:
-    """Insert a new pending translation and return it."""
+async def save_translation(original_text: str, source_lang: str, translation: str,
+                           status: str = "pending") -> dict:
+    """Insert a translation record and return it."""
     now = time.time()
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             """INSERT INTO open_query_translations
                (original_text, source_lang, translation, status, created_at)
-               VALUES (?, ?, ?, 'pending', ?)""",
-            (original_text, source_lang, translation, now),
+               VALUES (?, ?, ?, ?, ?)""",
+            (original_text, source_lang, translation, status, now),
         )
         row_id = cur.lastrowid
         await db.commit()
     return {"id": row_id, "original_text": original_text, "source_lang": source_lang,
-            "translation": translation, "status": "pending", "created_at": now}
+            "translation": translation, "status": status, "created_at": now}
 
 
 async def list_translations(status: str | None = None) -> list[dict]:
@@ -552,11 +553,65 @@ async def review_translation(row_id: int, status: str, translation: str | None =
 
 
 async def get_approved_translations() -> list[str]:
-    """Return the English translations of all approved open queries."""
+    """Return distinct English canonicals of all approved open queries."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            "SELECT translation FROM open_query_translations WHERE status='approved' ORDER BY created_at"
+            "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved' ORDER BY created_at"
         )
         rows = await cur.fetchall()
         return [r["translation"] for r in rows]
+
+
+async def get_pending_translation_texts() -> set[str]:
+    """Return EN translations that have at least one non-approved (pending/rejected) record.
+    Used to suppress them from the shared query list until approved."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT DISTINCT translation FROM open_query_translations WHERE status != 'approved'"
+        )
+        rows = await cur.fetchall()
+        return {r[0] for r in rows}
+
+
+async def get_translation_by_en_lang(en_text: str, lang: str) -> dict | None:
+    """Check if any record already maps source_lang=lang to the given EN canonical."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM open_query_translations WHERE translation=? AND source_lang=?",
+            (en_text, lang),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def get_multilingual_labels() -> dict[str, dict[str, str]]:
+    """Return {en_canonical: {lang: display_text}} for all approved open queries.
+
+    Collects every record whose EN canonical has at least one approved entry, so that
+    display labels for ES and CA are available even when introduced by the other language.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved'"
+        )
+        approved_en = [r["translation"] for r in await cur.fetchall()]
+        if not approved_en:
+            return {}
+        placeholders = ",".join("?" * len(approved_en))
+        cur = await db.execute(
+            f"SELECT translation, source_lang, original_text FROM open_query_translations "
+            f"WHERE translation IN ({placeholders})",
+            approved_en,
+        )
+        rows = await cur.fetchall()
+    result: dict[str, dict[str, str]] = {}
+    for r in rows:
+        en = r["translation"]
+        if en not in result:
+            result[en] = {}
+        if r["source_lang"] not in result[en]:
+            result[en][r["source_lang"]] = r["original_text"]
+    return result

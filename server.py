@@ -127,17 +127,25 @@ async def api_config():
     arena = CONFIG.get("arena", {})
     # Predefined queries from bundle + approved open queries (incl. translated ones)
     queries = ENGINE.bundle_queries()
+    open_query_labels: dict = {}
     if arena.get("allow_open_queries", False):
+        # Direct English open queries — but exclude any that are pending/rejected translations
+        # (those must go through admin approval before appearing for other participants)
         cached_queries = await db.get_cached_query_list()
+        pending_en = await db.get_pending_translation_texts()
         for q in cached_queries:
-            if q not in queries:
+            if q not in queries and q not in pending_en:
                 queries.append(q)
+        # Approved translated queries
         approved_en = await db.get_approved_translations()
         for q in approved_en:
             if q not in queries:
                 queries.append(q)
+        # Multilingual display labels so the UI can show ES/CA text for open queries
+        open_query_labels = await db.get_multilingual_labels()
     return {
         "predefined_queries": queries,
+        "open_query_labels": open_query_labels,
         "allow_open_queries": arena.get("allow_open_queries", False),
         "judge_question": arena.get("judge_question", "Which set of images is fairer?"),
         "search_query_label": arena.get("search_query_label", "Search query"),
@@ -557,6 +565,52 @@ async def _translate_with_llm(text: str, source_lang: str) -> str:
     return resp.choices[0].message.content.strip()
 
 
+async def _translate_en_to(text: str, target_lang: str) -> str:
+    """Translate an English query to target_lang for display labels."""
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        return text
+    api_key = os.environ.get("SCW_SECRET_KEY", "")
+    if not api_key:
+        return text
+    client = AsyncOpenAI(base_url="https://api.scaleway.ai/v1", api_key=api_key)
+    lang_name = {"es": "Spanish", "ca": "Catalan"}.get(target_lang, target_lang)
+    resp = await client.chat.completions.create(
+        model="mistral-small-3.2-24b-instruct-2506",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    f"You are a translation assistant. Translate the given English text to {lang_name}. "
+                    "Use compact, natural terms. Keep gender-neutral. "
+                    "Return only the translation, nothing else."
+                ),
+            },
+            {"role": "user", "content": text},
+        ],
+        max_tokens=64,
+        temperature=0.1,
+    )
+    return resp.choices[0].message.content.strip()
+
+
+async def _ensure_lang_variants(en_text: str, skip_lang: str):
+    """After approving a translation, auto-generate display labels for the other languages."""
+    for lang in ["es", "ca"]:
+        if lang == skip_lang:
+            continue
+        existing = await db.get_translation_by_en_lang(en_text, lang)
+        if existing:
+            continue
+        try:
+            label = await _translate_en_to(en_text, lang)
+            await db.save_translation(label, lang, en_text, status="approved")
+            log.info(f"Auto-generated {lang} display label for '{en_text}': '{label}'")
+        except Exception as e:
+            log.warning(f"Failed to auto-generate {lang} label for '{en_text}': {e}")
+
+
 @app.post("/api/translate")
 async def api_translate(request: Request):
     """
@@ -604,6 +658,7 @@ async def api_admin_list_translations(request: Request, status: str = ""):
 
 @app.post("/api/admin/translations/{row_id}/approve")
 async def api_admin_approve_translation(row_id: int, request: Request):
+    import asyncio
     check_admin(request)
     body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
     edited_text = (body.get("translation") or "").strip() or None
@@ -611,6 +666,8 @@ async def api_admin_approve_translation(row_id: int, request: Request):
     if row is None:
         raise HTTPException(404, "Translation not found")
     log.info(f"Translation {row_id} approved: '{row['translation']}'")
+    # Auto-generate display labels for the other UI languages in the background
+    asyncio.create_task(_ensure_lang_variants(row["translation"], row["source_lang"]))
     return row
 
 
