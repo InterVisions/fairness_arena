@@ -465,11 +465,16 @@ async def api_live_results_full():
         lambda: {"n_a": 0, "n_b": 0, "n_tie": 0}
     )))
 
+    allowed_pairs = [tuple(p) for p in CONFIG.get("arena", {}).get("allowed_pairs", [])]
+    norm_pair_set = {norm(a, b)[:2] for a, b in allowed_pairs} if allowed_pairs else set()
+
     for v in votes:
         ma_raw, mb_raw = v["model_a"] or "", v["model_b"] or ""
         if not ma_raw or not mb_raw:
             continue
         ma, mb, flipped = norm(ma_raw, mb_raw)
+        if norm_pair_set and (ma, mb) not in norm_pair_set:
+            continue
         pair_key = f"{ma} vs {mb}"
         q   = v["query"] or "unknown"
         sid = v["session_id"] or "none"
