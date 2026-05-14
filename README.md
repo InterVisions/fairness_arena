@@ -187,6 +187,56 @@ Typical bundle size: ~50-200 MB depending on dataset size and number of models.
 - **Bradley-Terry analysis** can be run post-hoc on the exported CSV for publishable confidence intervals
 - **Admin dashboard** with real-time stats, position bias monitoring, dataset switching, and data export
 
+## Post-Workshop Analysis
+
+After one or more sessions are complete, export votes from the admin panel ("Export analysis CSV") and run the analysis scripts from the `analysis/` folder.
+
+### Quick results (votes CSV only)
+
+```bash
+cd analysis/
+
+# Preference rates overall, per session, and per query
+python win_rates.py --votes /path/to/fairness_arena_analysis.csv
+
+# LaTeX table (model pair preference rates × session)
+python generate_table.py --votes /path/to/fairness_arena_analysis.csv \
+    --config ../config/default_config.json
+
+# Chi-square test: do different sessions differ? (needs ≥ 2 sessions)
+python community_analysis.py --votes /path/to/fairness_arena_analysis.csv
+```
+
+Outputs: `win_rates_overall.csv`, `win_rates_by_session.csv`, `win_rates_by_query.csv`, `results_table.tex`, `session_differences.csv`.
+
+### Full pipeline (includes NDKL automated metrics)
+
+Run these once per bundle (the face metadata is tied to the specific bundle):
+
+```bash
+cd analysis/
+
+# 1. Generate face metadata from filenames stored in the bundle
+python make_face_metadata.py --bundle ../data/arena_bundle_cfd.npz \
+    --output ../data/face_metadata.csv
+
+# 2. Compute NDKL fairness scores per vote
+python compute_ndkl.py --votes /path/to/fairness_arena_analysis.csv \
+    --bundle ../data/arena_bundle_cfd.npz \
+    --metadata ../data/face_metadata.csv
+
+# 3. Compute Spearman correlation between human votes and NDKL
+python alignment_correlation.py --votes /path/to/fairness_arena_analysis.csv \
+    --metrics automated_metrics.csv
+
+# 4. Generate all tables and figures for the paper
+python generate_all_tables.py
+```
+
+Outputs: `automated_metrics.csv`, `alignment_results.csv`, `table1_win_rates.csv`, `table2_by_session.csv`, `figure1_forest.png`, `figure2_heatmap.png`, `figure3_scatter.png`.
+
+> **Note:** `make_face_metadata.py` reads filenames directly from the bundle, so the `image_id` mapping is always consistent with the rankings stored in the votes CSV. Re-run it if you rebuild the bundle.
+
 ## Project Structure
 
 ```
@@ -195,6 +245,7 @@ fairness-arena/
 ├── precompute.py          # Offline: embed + retrieve + pack bundle
 ├── database.py            # SQLite + Elo logic
 ├── retrieval.py           # CLIP model loading + retrieval + bundle loading
+├── test_pipeline.py       # Integration + statistical tests
 ├── requirements.txt
 ├── arena.service
 ├── config/
@@ -202,13 +253,22 @@ fairness-arena/
 │   ├── active_config.json    # Runtime overrides (created by admin panel)
 │   └── queries.txt           # One query per line — baked into bundles at precompute time
 ├── data/
-│   ├── arena.db                      # Created at runtime (votes, ratings)
-│   ├── arena_bundle_flickr30k.npz    # Created by precompute.py (one per dataset)
-│   └── arena_bundle_fairface.npz
-└── static/
-    ├── arena.html          # Public voting interface
-    ├── admin.html          # Admin dashboard
-    └── leaderboard.html    # Public leaderboard
+│   ├── arena.db                   # Created at runtime (votes, ratings)
+│   ├── arena_bundle_cfd.npz       # Created by precompute.py (one per dataset)
+│   └── face_metadata.csv          # Created by analysis/make_face_metadata.py
+├── static/
+│   ├── arena.html          # Public voting interface
+│   ├── admin.html          # Admin dashboard
+│   ├── results.html        # Live results (pair preference × session)
+│   └── leaderboard.html    # Public leaderboard
+└── analysis/
+    ├── make_face_metadata.py      # Generate face_metadata.csv from bundle filenames
+    ├── compute_ndkl.py            # Compute NDKL fairness scores per vote
+    ├── alignment_correlation.py   # Human vs automated metric correlation
+    ├── win_rates.py               # Win rates overall / by session / by query
+    ├── community_analysis.py      # Chi-square test across sessions
+    ├── generate_table.py          # LaTeX table from votes CSV
+    └── generate_all_tables.py     # Aggregate tables + figures (full pipeline)
 ```
 
 ## (Optional) Configure the systemd service
