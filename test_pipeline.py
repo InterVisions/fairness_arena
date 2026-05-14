@@ -5,8 +5,9 @@ Integration and unit tests for the Fairness Arena server.
 
 Covers:
   - allowed_pairs filtering in _tally, api_live_results, and api_live_results/full
-  - api_match pair selection
-  - Workshop creation and vote recording
+  - api_match pair selection (fixed contrast per query, round-robin assignment)
+  - Session creation and vote recording
+  - Left/right position uniformity (still random per vote)
 
 Usage:
     python test_pipeline.py
@@ -224,95 +225,48 @@ async def test_session_vote_recording(tmp_db: str):
 
 # ── Statistical uniformity test ───────────────────────────────────────────────
 
-def test_pair_selection_uniformity(n: int = 3000, sigma: float = 4.0):
+def test_contrast_assignment_round_robin():
     """
-    Verify that api_match's random selections are statistically uniform:
-      - Each of the 3 allowed pairs is chosen ~33% of the time
-      - Left/right position assignment is ~50%
-      - Model A/B labeling (which model gets the 'A' slot) is ~50%
-
-    All counters must stay within ±sigma standard deviations of the expected mean.
-    n=3000, sigma=4.0 → expected std for pair counts ~= 26, for 50/50 ~= 27.
-    A genuine bug (e.g. one pair always chosen) would be >100 std away.
+    Verify that _get_or_assign_contrast distributes queries evenly across pairs.
+    With N queries and K pairs, each pair should get floor(N/K) or ceil(N/K) queries.
     """
-    valid_pairs = list(ALLOWED_PAIRS)   # 3 pairs
+    valid_pairs = list(ALLOWED_PAIRS)
     k = len(valid_pairs)
-    assert k > 0
 
-    pair_counts   = {p: 0 for p in valid_pairs}
-    left_a_count  = 0   # how often model_a is placed on the left
-    is_a_count    = 0   # how often the randomly-chosen 'first' model keeps the A label
+    for n_queries in [10, 30, 31]:
+        counts = {p: 0 for p in valid_pairs}
+        for _ in range(n_queries):
+            # Reproduce round-robin logic from _get_or_assign_contrast
+            pair = min(valid_pairs, key=lambda p: (counts[p], valid_pairs.index(p)))
+            counts[pair] += 1
 
+        for pair, count in counts.items():
+            lo, hi = n_queries // k, (n_queries + k - 1) // k
+            assert lo <= count <= hi, (
+                f"n_queries={n_queries}: pair {pair} got {count} assignments "
+                f"(expected {lo}–{hi})"
+            )
+        print(f"  [OK] {n_queries} queries, {k} pairs: " +
+              ", ".join(f"{p[0]} vs {p[1]}={counts[p]}" for p in valid_pairs))
+
+
+def test_position_uniformity(n: int = 3000, sigma: float = 4.0):
+    """
+    Left/right position is still randomised per vote — verify ~50% each.
+    n=3000, sigma=4.0 → std ~= 27; a broken flip (always left) is >50σ away.
+    """
     rng = random.Random(42)
+    left_a_count = sum(1 for _ in range(n) if rng.random() < 0.5)
 
-    for _ in range(n):
-        # Reproduce api_match logic
-        pair = rng.choice(valid_pairs)
-        model_a, model_b = pair
-        pair_counts[pair] += 1
-
-        # Position assignment: random.random() < 0.5 → model_a on left
-        left_is_a = rng.random() < 0.5
-        if left_is_a:
-            left_a_count += 1
-
-        # A/B labeling: in api_match, the pair order is fixed from valid_pairs;
-        # the only randomness is which pair is chosen and left/right flip.
-        # So model_a label is deterministic per pair — what matters is position.
-        # We also check that across all draws each model appears in A slot ~50%.
-        is_a_count += 1  # model_a is always 'A' in api_match (position is the variable)
-
-    # ── Pair frequency: expected ~n/k each ───────────────────────────────────
-    expected_pair = n / k
-    std_pair = math.sqrt(n * (1 / k) * (1 - 1 / k))
-    for pair, count in pair_counts.items():
-        z = abs(count - expected_pair) / std_pair
-        assert z < sigma, (
-            f"Pair {pair} chosen {count}/{n} times (z={z:.1f}σ > {sigma}σ). "
-            f"Expected ~{expected_pair:.0f} ± {std_pair:.0f}"
-        )
-    print(f"  [OK] pair frequencies: " +
-          ", ".join(f"{p[0]} vs {p[1]}={c}"
-                    for p, c in pair_counts.items()))
-
-    # ── Left/right position: expected ~n/2 ───────────────────────────────────
-    expected_pos = n / 2
-    std_pos = math.sqrt(n * 0.5 * 0.5)
-    z_pos = abs(left_a_count - expected_pos) / std_pos
-    assert z_pos < sigma, (
-        f"Left-position count {left_a_count}/{n} (z={z_pos:.1f}σ > {sigma}σ). "
-        f"Expected ~{expected_pos:.0f} ± {std_pos:.0f}"
+    expected = n / 2
+    std = math.sqrt(n * 0.5 * 0.5)
+    z = abs(left_a_count - expected) / std
+    assert z < sigma, (
+        f"Left-position count {left_a_count}/{n} (z={z:.1f}σ > {sigma}σ). "
+        f"Expected ~{expected:.0f} ± {std:.0f}"
     )
-    print(f"  [OK] left/right position: model_a on left {left_a_count}/{n} times "
-          f"({100*left_a_count/n:.1f}%, z={z_pos:.2f}σ)")
-
-    # ── Per-pair left/right balance ───────────────────────────────────────────
-    # For each pair, model_a should end up on the left ~50% of draws.
-    # A/B label is fixed by pair order in config (intentional); only position is random.
-    pair_left_counts: dict[tuple, int] = {p: 0 for p in valid_pairs}
-    pair_total_counts: dict[tuple, int] = {p: 0 for p in valid_pairs}
-    rng2 = random.Random(42)
-    for _ in range(n):
-        pair = rng2.choice(valid_pairs)
-        pair_total_counts[pair] += 1
-        if rng2.random() < 0.5:
-            pair_left_counts[pair] += 1
-
-    for pair in valid_pairs:
-        total = pair_total_counts[pair]
-        left  = pair_left_counts[pair]
-        if total < 10:
-            continue
-        std  = math.sqrt(total * 0.5 * 0.5)
-        z    = abs(left - total / 2) / std
-        assert z < sigma, (
-            f"Pair {pair}: model_a on left {left}/{total} times "
-            f"({100*left/total:.1f}%, z={z:.1f}σ > {sigma}σ)"
-        )
-    print(f"  [OK] per-pair left/right balance: " +
-          ", ".join(f"{p[0]} vs {p[1]}: "
-                    f"{pair_left_counts[p]}/{pair_total_counts[p]}"
-                    for p in valid_pairs))
+    print(f"  [OK] left/right position: {left_a_count}/{n} left "
+          f"({100*left_a_count/n:.1f}%, z={z:.2f}σ)")
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
@@ -334,8 +288,11 @@ async def main(tmp_db_1: str, tmp_db_2: str):
     print("\n[3] Session creation and vote recording")
     await test_session_vote_recording(tmp_db_2)
 
-    print("\n[4] Pair selection statistical uniformity (n=3000)")
-    test_pair_selection_uniformity()
+    print("\n[4] Contrast assignment round-robin (10/30/31 queries)")
+    test_contrast_assignment_round_robin()
+
+    print("\n[5] Left/right position uniformity (n=3000)")
+    test_position_uniformity()
 
     print("\n" + "=" * 60)
     print("  All tests passed.")

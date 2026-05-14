@@ -157,28 +157,50 @@ async def api_config():
     }
 
 
+def _get_valid_pairs() -> list[tuple[str, str]]:
+    """Return the list of valid (model_a, model_b) pairs for the current config."""
+    enabled_models = ENGINE.loaded_models()
+    if not enabled_models:
+        enabled_models = [m["id"] for m in CONFIG.get("models", []) if m.get("enabled")]
+    allowed_pairs = [tuple(p) for p in CONFIG.get("arena", {}).get("allowed_pairs", [])]
+    if allowed_pairs:
+        enabled_set = set(enabled_models)
+        return [(a, b) for a, b in allowed_pairs if a in enabled_set and b in enabled_set]
+    # No allowed_pairs config — treat all 2-combinations as valid
+    from itertools import combinations
+    return list(combinations(enabled_models, 2))
+
+
+async def _get_or_assign_contrast(query: str, valid_pairs: list[tuple[str, str]]) -> tuple[str, str]:
+    """Return the fixed contrast pair for this query, assigning one if not yet set.
+
+    Assignment uses round-robin across valid_pairs (least-used pair wins).
+    If the stored pair is no longer in valid_pairs (e.g. model disabled),
+    a new assignment is made.
+    """
+    existing = await db.get_query_contrast(query)
+    if existing and existing in valid_pairs:
+        return existing
+
+    counts = await db.get_contrast_assignment_counts(valid_pairs)
+    # Pick pair with fewest assignments; ties broken by position in valid_pairs
+    pair = min(valid_pairs, key=lambda p: (counts[p], valid_pairs.index(p)))
+    await db.set_query_contrast(query, pair[0], pair[1])
+    log.info(f"Assigned contrast {pair} to query '{query}'")
+    return pair
+
+
 @app.get("/api/match")
 async def api_match(query: str, participant_id: str = ""):
     """
     Get a new match: select two models, retrieve results, return image grids.
-    When arena.allowed_pairs is configured, restricts selection to those pairs.
-    Randomises left/right assignment.
+    The model pair (contrast) is fixed per query; left/right assignment is random per vote.
     """
-    enabled_models = ENGINE.loaded_models()
-    if not enabled_models:
-        enabled_models = [m["id"] for m in CONFIG.get("models", []) if m.get("enabled")]
-    if len(enabled_models) < 2:
+    valid_pairs = _get_valid_pairs()
+    if not valid_pairs:
         raise HTTPException(400, "Need at least 2 enabled models")
 
-    allowed_pairs = [tuple(p) for p in CONFIG.get("arena", {}).get("allowed_pairs", [])]
-    if allowed_pairs:
-        enabled_set = set(enabled_models)
-        valid_pairs = [(a, b) for a, b in allowed_pairs if a in enabled_set and b in enabled_set]
-        if not valid_pairs:
-            raise HTTPException(400, "No valid allowed pairs available for loaded models")
-        model_a, model_b = random.choice(valid_pairs)
-    else:
-        model_a, model_b = random.sample(enabled_models, 2)
+    model_a, model_b = await _get_or_assign_contrast(query, valid_pairs)
 
     # Randomise left/right position
     if random.random() < 0.5:
@@ -920,6 +942,14 @@ async def startup():
     model_ids = ENGINE.loaded_models()
     initial = CONFIG["arena"].get("elo_initial_rating", 1500)
     await db.ensure_model_ratings(model_ids, initial)
+
+    # Assign fixed contrasts to all predefined queries (round-robin, skips already-assigned)
+    valid_pairs = _get_valid_pairs()
+    if valid_pairs:
+        predefined = ENGINE.bundle_queries() or CONFIG.get("arena", {}).get("predefined_queries", [])
+        for q in predefined:
+            await _get_or_assign_contrast(q, valid_pairs)
+        log.info(f"Query contrasts seeded for {len(predefined)} predefined queries")
 
     mode = "bundle" if bundle else "live"
     log.info("=" * 60)

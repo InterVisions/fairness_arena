@@ -81,6 +81,13 @@ async def init_db():
                 created_at REAL NOT NULL,
                 reviewed_at REAL
             );
+
+            CREATE TABLE IF NOT EXISTS query_contrasts (
+                query TEXT PRIMARY KEY,
+                model_a TEXT NOT NULL,
+                model_b TEXT NOT NULL,
+                assigned_at REAL NOT NULL
+            );
         """)
         await db.commit()
         # Migrations for columns added after initial schema
@@ -615,3 +622,43 @@ async def get_multilingual_labels() -> dict[str, dict[str, str]]:
         if r["source_lang"] not in result[en]:
             result[en][r["source_lang"]] = r["original_text"]
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Query contrasts (fixed model-pair assignment per query)
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def get_query_contrast(query: str) -> tuple[str, str] | None:
+    """Return the (model_a, model_b) pair assigned to this query, or None."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT model_a, model_b FROM query_contrasts WHERE query=?", (query,)
+        )
+        row = await cur.fetchone()
+        return (row[0], row[1]) if row else None
+
+
+async def set_query_contrast(query: str, model_a: str, model_b: str) -> None:
+    """Persist the contrast assignment for a query (upsert)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO query_contrasts (query, model_a, model_b, assigned_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(query) DO UPDATE SET model_a=excluded.model_a,
+                   model_b=excluded.model_b, assigned_at=excluded.assigned_at""",
+            (query, model_a, model_b, time.time()),
+        )
+        await db.commit()
+
+
+async def get_contrast_assignment_counts(valid_pairs: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
+    """Count how many queries are currently assigned to each pair."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT model_a, model_b FROM query_contrasts")
+        rows = await cur.fetchall()
+    counts: dict[tuple[str, str], int] = {p: 0 for p in valid_pairs}
+    for model_a, model_b in rows:
+        key = (model_a, model_b)
+        if key in counts:
+            counts[key] += 1
+    return counts
