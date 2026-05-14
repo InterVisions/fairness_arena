@@ -148,6 +148,9 @@ class RetrievalEngine:
         if not self.dataset_loaded:
             raise RuntimeError("No dataset loaded")
 
+        if not self.dataset:
+            raise RuntimeError(f"Dataset is empty — check the configured folder/source path")
+
         m = self.models[model_id]
         model = m["model"]
         preprocess = m["preprocess"]
