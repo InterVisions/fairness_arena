@@ -281,7 +281,7 @@ def test_pair_selection_uniformity(n: int = 3000, sigma: float = 4.0):
             f"Expected ~{expected_pair:.0f} ± {std_pair:.0f}"
         )
     print(f"  [OK] pair frequencies: " +
-          ", ".join(f"{p[0].split('-')[0]}/{p[1].split('-')[0]}={c}"
+          ", ".join(f"{p[0]} vs {p[1]}={c}"
                     for p, c in pair_counts.items()))
 
     # ── Left/right position: expected ~n/2 ───────────────────────────────────
@@ -319,7 +319,7 @@ def test_pair_selection_uniformity(n: int = 3000, sigma: float = 4.0):
             f"({100*left/total:.1f}%, z={z:.1f}σ > {sigma}σ)"
         )
     print(f"  [OK] per-pair left/right balance: " +
-          ", ".join(f"{p[0].split('-')[0]}/{p[1].split('-')[0]} "
+          ", ".join(f"{p[0]} vs {p[1]}: "
                     f"{pair_left_counts[p]}/{pair_total_counts[p]}"
                     for p in valid_pairs))
 
