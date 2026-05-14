@@ -614,8 +614,13 @@ async function rejectTranslation(id) {
   loadTranslations();
 }
 
-// Auto-refresh every 10s
-setInterval(() => { if (TOKEN) Promise.all([refreshStats(), loadSessions(), loadTranslations()]); }, 10000);
+// Auto-refresh every 10s — skip translations table if a field is being edited
+setInterval(() => {
+  if (!TOKEN) return;
+  refreshStats();
+  loadSessions();
+  if (!document.activeElement?.classList.contains('trans-edit')) loadTranslations();
+}, 10000);
 </script>
 </body>
 </html>
