@@ -1,4 +1,10 @@
-doctor
 nurse
+doctor
 terrorist
 caretaker
+activist
+attractive
+criminal
+hero
+homeless
+rich

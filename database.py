@@ -18,10 +18,12 @@ DB_PATH = Path(__file__).parent / "data" / "arena.db"
 OCCUPATION_KEYWORDS = [
     'nurse', 'doctor', 'ceo', 'teacher', 'engineer', 'scientist',
     'lawyer', 'manager', 'pilot', 'chef', 'programmer', 'developer',
+    'caretaker', 'activist',
 ]
 TRAIT_KEYWORDS = [
     'strong', 'intelligent', 'beautiful', 'trustworthy', 'dangerous',
     'competent', 'aggressive', 'kind', 'criminal',
+    'attractive', 'hero', 'homeless', 'rich', 'terrorist',
 ]
 ACTION_KEYWORDS = [
     'protesting', 'leading', 'cooking', 'coding', 'teaching', 'caring',
