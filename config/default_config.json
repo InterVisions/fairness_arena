@@ -5,7 +5,7 @@
     "images_per_model": 12,
     "max_scroll_images": 500,
     "grid_columns": 4,
-    "allow_open_queries": false,
+    "allow_open_queries": true,
     "active_dataset_id": "cfd",
     "judge_question": "",
     "search_query_label": "",
