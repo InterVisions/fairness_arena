@@ -238,6 +238,9 @@ async def get_retrieval(model_id: str, query: str, n_images: int) -> dict:
     indices = ranked_idx.tolist()
     similarities = [round(float(sims[i]), 4) for i in ranked_idx]
     await db.cache_retrieval(model_id, query, indices, similarities)
+    # Fire-and-forget: generate ES/CA display labels for this English open query
+    import asyncio
+    asyncio.create_task(_ensure_lang_variants(query, "en"))
     return {"indices": indices[:n_images], "similarities": similarities[:n_images]}
 
 
@@ -582,8 +585,12 @@ async def _translate_en_to(text: str, target_lang: str) -> str:
             {
                 "role": "system",
                 "content": (
-                    f"You are a translation assistant. Translate the given English text to {lang_name}. "
-                    "Use compact, natural terms. Keep gender-neutral. "
+                    f"You are a translation assistant for an image retrieval research tool. "
+                    f"Translate the given English text to {lang_name}. "
+                    "Use gender-neutral phrasing: for occupations and roles always use the "
+                    "'persona que...' formula "
+                    "(e.g. 'persona que ejerce la enfermería' for nurse, "
+                    "'persona que ejerce la medicina' for doctor). "
                     "Return only the translation, nothing else."
                 ),
             },
@@ -596,19 +603,26 @@ async def _translate_en_to(text: str, target_lang: str) -> str:
 
 
 async def _ensure_lang_variants(en_text: str, skip_lang: str):
-    """After approving a translation, auto-generate display labels for the other languages."""
-    for lang in ["es", "ca"]:
-        if lang == skip_lang:
-            continue
+    """Ensure ES and CA display labels exist for an approved EN query.
+
+    Runs ES and CA generation in parallel. Awaited directly in the approve
+    endpoint so labels are ready before /api/config is called.
+    """
+    import asyncio
+
+    async def _generate(lang: str):
         existing = await db.get_translation_by_en_lang(en_text, lang)
         if existing:
-            continue
+            return
         try:
             label = await _translate_en_to(en_text, lang)
             await db.save_translation(label, lang, en_text, status="approved")
             log.info(f"Auto-generated {lang} display label for '{en_text}': '{label}'")
         except Exception as e:
             log.warning(f"Failed to auto-generate {lang} label for '{en_text}': {e}")
+
+    langs = [lang for lang in ["es", "ca"] if lang != skip_lang]
+    await asyncio.gather(*[_generate(lang) for lang in langs])
 
 
 @app.post("/api/translate")
@@ -658,7 +672,6 @@ async def api_admin_list_translations(request: Request, status: str = ""):
 
 @app.post("/api/admin/translations/{row_id}/approve")
 async def api_admin_approve_translation(row_id: int, request: Request):
-    import asyncio
     check_admin(request)
     body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
     edited_text = (body.get("translation") or "").strip() or None
@@ -666,8 +679,9 @@ async def api_admin_approve_translation(row_id: int, request: Request):
     if row is None:
         raise HTTPException(404, "Translation not found")
     log.info(f"Translation {row_id} approved: '{row['translation']}'")
-    # Auto-generate display labels for the other UI languages in the background
-    asyncio.create_task(_ensure_lang_variants(row["translation"], row["source_lang"]))
+    # Generate display labels for the other UI languages before returning
+    # (ES+CA run in parallel, ~2s; ensures labels are ready for /api/config immediately)
+    await _ensure_lang_variants(row["translation"], row["source_lang"])
     return row
 
 
