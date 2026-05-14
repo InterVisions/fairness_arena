@@ -18,30 +18,27 @@ Bold cell = 95% Wilson CI does not include 50% (result distinguishable from chan
 from __future__ import annotations
 
 import argparse
+import csv as _csv
+import json
 import math
 import sqlite3
 from pathlib import Path
 
-DB  = Path(__file__).parent.parent / "data" / "arena.db"
+DB      = Path(__file__).parent.parent / "data" / "arena.db"
+CONFIG  = Path(__file__).parent.parent / "config" / "default_config.json"
 
-# Short display names.  Add entries here as you add models to the arena.
-MODEL_NAMES: dict[str, str] = {
-    "openai-vitb32": "OpenAI B/32",
-    "openai-vitb16": "OpenAI B/16",
-    "openai-vitl14": "OpenAI L/14",
-    "laion-vitb32":  "LAION B/32",
-    # AIES-specific model IDs (if the bundle uses HuggingFace-style IDs)
-    "openai/clip-vit-base-patch16":           "CLIP B/16",
-    "laion/CLIP-ViT-B-16-laion2B-s34B-b88K": "LAION B/16",
-    "google/siglip-base-patch16-224":         "SigLIP",
-    "google/siglip2-base-patch16-224":        "SigLIP2",
-    "M2_SANER":                               "SANER",
-    "M2_NeuralInt":                           "NeuralInt",
-    "laion/CLIP-ViT-L-14-laion2B-s32B-b82K": "LAION L/14",
-}
+_MODEL_NAMES: dict[str, str] = {}
+
+def load_model_names(config_path: Path):
+    if not config_path.exists():
+        return
+    with open(config_path) as f:
+        cfg = json.load(f)
+    for m in cfg.get("models", []):
+        _MODEL_NAMES[m["id"]] = m["name"]
 
 def mname(mid: str) -> str:
-    return MODEL_NAMES.get(mid, mid)
+    return _MODEL_NAMES.get(mid, mid)
 
 def norm(ma: str, mb: str) -> tuple[str, str, bool]:
     """Canonical pair: alphabetical order. Returns (ma, mb, flipped)."""
@@ -57,7 +54,19 @@ def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     return max(0.0, c - m), min(1.0, c + m)
 
 
-def load_data(db_path: Path) -> tuple[list[dict], list[dict]]:
+def load_data_from_csv(csv_path: Path) -> tuple[list[dict], list[dict]]:
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(_csv.DictReader(f))
+    sessions_seen: dict[str, str] = {}
+    for r in rows:
+        sid = r.get("session_id") or ""
+        if sid and sid not in sessions_seen:
+            sessions_seen[sid] = r.get("session_name") or sid
+    sessions = [{"id": sid, "name": name} for sid, name in sessions_seen.items()]
+    return sessions, rows
+
+
+def load_data_from_db(db_path: Path) -> tuple[list[dict], list[dict]]:
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
     sessions = [dict(r) for r in con.execute(
@@ -172,11 +181,20 @@ def generate_latex(sessions: list[dict], tally: dict) -> str:
 
 def main():
     p = argparse.ArgumentParser(description="Generate LaTeX results table")
-    p.add_argument("--db",  default=str(DB),   help="Path to arena.db")
-    p.add_argument("--out", default="results_table.tex", help="Output .tex file")
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--votes", default=None, help="Path to analysis export CSV (recommended)")
+    src.add_argument("--db",    default=str(DB), help="Path to arena.db (fallback)")
+    p.add_argument("--config", default=str(CONFIG), help="Path to config JSON for model display names")
+    p.add_argument("--out",    default="results_table.tex", help="Output .tex file")
     args = p.parse_args()
 
-    sessions, votes = load_data(Path(args.db))
+    load_model_names(Path(args.config))
+
+    if args.votes:
+        sessions, votes = load_data_from_csv(Path(args.votes))
+    else:
+        sessions, votes = load_data_from_db(Path(args.db))
+
     if not votes:
         print("No votes found in database.")
         return
