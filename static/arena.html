@@ -52,6 +52,21 @@
   }
   .header-links a:hover { color: var(--accent); }
 
+  .lang-switcher { display: flex; gap: 4px; }
+  .lang-btn {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    letter-spacing: 0.05em;
+  }
+  .lang-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .lang-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
   .participant-badge {
     font-family: var(--mono);
     font-size: 0.7rem;
@@ -467,12 +482,15 @@
 <!-- Registration modal -->
 <div class="modal-overlay" id="reg-modal">
   <div class="modal">
-    <h2>Welcome to InterVisions Fairness Arena</h2>
-    <p>Help us evaluate how fairly AI models represent people.
+    <h2 data-i18n="ui.welcome_title">Welcome to InterVisions Fairness Arena</h2>
+    <p data-i18n="ui.welcome_body">Help us evaluate how fairly AI models represent people.
        Compare image search results and vote for the fairer one.</p>
-    <input type="text" id="nickname-input" placeholder="Enter a nickname (optional)">
+    <input type="text" id="nickname-input"
+           data-i18n="ui.nickname_placeholder" data-i18n-attr="placeholder"
+           placeholder="Enter a nickname (optional)">
     <br>
-    <button class="btn btn-primary" onclick="register()" style="width:100%">Start</button>
+    <button class="btn btn-primary" onclick="register()" style="width:100%"
+            data-i18n="ui.start_btn">Start</button>
   </div>
 </div>
 
@@ -483,6 +501,11 @@
     <span class="participant-badge" id="pid-badge" style="display:none"></span>
     <span class="stats-bar" id="vote-count-display"></span>
     <a href="/leaderboard">Leaderboard</a>
+    <div class="lang-switcher">
+      <button class="lang-btn active" data-lang="en" onclick="I18n.switchTo('en')">EN</button>
+      <button class="lang-btn" data-lang="es" onclick="I18n.switchTo('es')">ES</button>
+      <button class="lang-btn" data-lang="ca" onclick="I18n.switchTo('ca')">CA</button>
+    </div>
   </div>
 </div>
 
@@ -494,16 +517,20 @@
     <div class="query-row">
       <label id="search-query-label"></label>
       <div class="query-input-wrap">
-        <input id="query-input" type="text" autocomplete="off" placeholder="Select or type a query…">
+        <input id="query-input" type="text" autocomplete="off"
+               data-i18n="ui.query_placeholder" data-i18n-attr="placeholder"
+               placeholder="Select or type a query…">
         <div id="query-suggestions"></div>
       </div>
-      <button class="btn btn-primary" onclick="startMatch()">Search</button>
-      <button class="btn btn-outline" onclick="randomQuery()">Random</button>
+      <button class="btn btn-primary" onclick="startMatch()"
+              data-i18n="ui.search_btn">Search</button>
+      <button class="btn btn-outline" onclick="randomQuery()"
+              data-i18n="ui.random_btn">Random</button>
     </div>
   </div>
 
   <!-- Vote confirmation toast -->
-  <div class="vote-toast" id="vote-toast">
+  <div class="vote-toast" id="vote-toast" data-i18n="ui.toast_msg">
     ✓ Your vote has been submitted. Please try with another query.
   </div>
 
@@ -540,25 +567,30 @@
   <!-- Voting -->
   <div class="vote-panel" id="vote-panel" style="display:none">
     <div class="vote-buttons">
-      <button class="vote-btn" data-vote="left" onclick="selectVote('left')">👈 Left is fairer</button>
-      <button class="vote-btn" data-vote="tie" onclick="selectVote('tie')">🤝 Tie</button>
-      <button class="vote-btn" data-vote="right" onclick="selectVote('right')">Right is fairer 👉</button>
+      <button class="vote-btn" data-vote="left" onclick="selectVote('left')"
+              data-i18n="ui.vote_left">👈 Left is fairer</button>
+      <button class="vote-btn" data-vote="tie" onclick="selectVote('tie')"
+              data-i18n="ui.vote_tie">🤝 Tie</button>
+      <button class="vote-btn" data-vote="right" onclick="selectVote('right')"
+              data-i18n="ui.vote_right">Right is fairer 👉</button>
     </div>
 
     <div class="why-section" id="why-section">
-      <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:8px">
-        Why? (optional — select any that apply)
-      </p>
+      <p style="font-size:0.8rem;color:var(--text-dim);margin-bottom:8px"
+         data-i18n="ui.why_prompt">Why? (optional — select any that apply)</p>
       <div class="why-tags" id="why-tags"></div>
       <textarea class="why-freetext" id="why-freetext" rows="2"
+                data-i18n="ui.why_placeholder" data-i18n-attr="placeholder"
                 placeholder="Any other thoughts? (optional)"></textarea>
       <br><br>
-      <button class="btn btn-primary" onclick="submitVote()">Submit vote</button>
+      <button class="btn btn-primary" onclick="submitVote()"
+              data-i18n="ui.submit_btn">Submit vote</button>
     </div>
   </div>
 
 </div>
 
+<script src="/static/i18n.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════════
 //  State
@@ -570,6 +602,7 @@ const S = {
   selectedVote: null,
   selectedTags: new Set(),
   totalVotes: 0,
+  _queryKey: null,   // EN canonical key of the currently selected predefined query
 };
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -579,6 +612,21 @@ async function init() {
   // Activate debug mode via ?debug=1
   if (new URLSearchParams(window.location.search).get('debug') === '1')
     document.body.classList.add('debug-mode');
+
+  // Init i18n (loads all locale files, applies saved language)
+  await I18n.init(['en', 'es', 'ca'], 'en');
+
+  // Re-render query list on language change
+  I18n.onLanguageChange(() => {
+    populateQueries(S.config.predefined_queries || []);
+    // Update query input if a predefined query is selected
+    if (S._queryKey) {
+      document.getElementById('query-input').value = I18n.queryLabel(S._queryKey);
+    }
+    // Update vote count display
+    document.getElementById('vote-count-display').textContent =
+      I18n.t('ui.votes_display').replace('{n}', S.totalVotes);
+  });
 
   // Load config
   const resp = await fetch('/api/config');
@@ -672,18 +720,21 @@ function populateQueries(queries) {
 
 function renderSuggestions(filter) {
   const box = document.getElementById('query-suggestions');
+  const keys = S._queries || [];
   const list = filter
-    ? (S._queries || []).filter(q => q.toLowerCase().includes(filter.toLowerCase()))
-    : (S._queries || []);
+    ? keys.filter(k => I18n.queryLabel(k).toLowerCase().includes(filter.toLowerCase()))
+    : keys;
   if (!list.length) { box.classList.remove('open'); return; }
   box.innerHTML = '';
-  list.forEach(q => {
+  list.forEach(k => {
     const el = document.createElement('div');
     el.className = 'suggestion-item';
-    el.textContent = q;
+    el.textContent = I18n.queryLabel(k);
+    el.dataset.key = k;
     el.addEventListener('mousedown', e => {
       e.preventDefault();
-      document.getElementById('query-input').value = q;
+      S._queryKey = k;
+      document.getElementById('query-input').value = I18n.queryLabel(k);
       box.classList.remove('open');
       startMatch();
     });
@@ -715,13 +766,18 @@ window.addEventListener('load', () => {
 
   inp.addEventListener('focus', openSuggestions);
   inp.addEventListener('click', openSuggestions);
-  inp.addEventListener('input', () => { activeIdx = -1; renderSuggestions(inp.value); });
+  inp.addEventListener('input', () => {
+    S._queryKey = null;  // user is typing freely — no longer a predefined query
+    activeIdx = -1;
+    renderSuggestions(inp.value);
+  });
   inp.addEventListener('keydown', e => {
     const items = box.querySelectorAll('.suggestion-item');
     if (e.key === 'ArrowDown') { e.preventDefault(); updateActive(activeIdx + 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); updateActive(activeIdx - 1); }
     else if (e.key === 'Enter') {
       if (activeIdx >= 0 && items[activeIdx]) {
+        S._queryKey = items[activeIdx].dataset.key;
         inp.value = items[activeIdx].textContent;
       }
       if (inp.value.trim()) { box.classList.remove('open'); startMatch(); }
@@ -741,9 +797,11 @@ async function refreshQueries() {
 }
 
 function randomQuery() {
-  const queries = S.config.predefined_queries || [];
-  const q = queries[Math.floor(Math.random() * queries.length)];
-  document.getElementById('query-input').value = q;
+  const keys = S._queries || [];
+  if (!keys.length) return;
+  const k = keys[Math.floor(Math.random() * keys.length)];
+  S._queryKey = k;
+  document.getElementById('query-input').value = I18n.queryLabel(k);
   startMatch();
 }
 
@@ -766,14 +824,16 @@ async function startMatch() {
   document.getElementById('comparison').classList.add('loading');
   document.getElementById('vote-panel').style.display = 'none';
 
-  const resp = await fetch(`/api/match?query=${encodeURIComponent(query)}&participant_id=${S.pid}`);
+  // Use EN canonical key for predefined queries; raw input for open queries
+  const serverQuery = S._queryKey || query;
+  const resp = await fetch(`/api/match?query=${encodeURIComponent(serverQuery)}&participant_id=${S.pid}`);
   const match = await resp.json();
   S.currentMatch = match;
 
-  // Set labels
-  document.getElementById('label-left').textContent = match.left.label;
-  document.getElementById('label-right').textContent = match.right.label;
+  // Set labels (server always returns 'Model A'/'Model B' in EN)
   const leftIsA = match.left.label === 'Model A';
+  document.getElementById('label-left').textContent  = leftIsA ? I18n.t('ui.model_a') : I18n.t('ui.model_b');
+  document.getElementById('label-right').textContent = leftIsA ? I18n.t('ui.model_b') : I18n.t('ui.model_a');
   document.getElementById('label-left').className = 'model-label ' + (leftIsA ? 'label-a' : 'label-b');
   document.getElementById('label-right').className = 'model-label ' + (leftIsA ? 'label-b' : 'label-a');
 
@@ -925,7 +985,9 @@ async function submitVote() {
   });
 
   S.totalVotes++;
-  document.getElementById('vote-count-display').textContent = `${S.totalVotes} votes this session`;
+  S._queryKey = null;
+  document.getElementById('vote-count-display').textContent =
+    I18n.t('ui.votes_display').replace('{n}', S.totalVotes);
   document.getElementById('why-freetext').value = '';
 
   // Reset to initial state
