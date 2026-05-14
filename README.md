@@ -237,6 +237,65 @@ Outputs: `automated_metrics.csv`, `alignment_results.csv`, `table1_win_rates.csv
 
 > **Note:** `make_face_metadata.py` reads filenames directly from the bundle, so the `image_id` mapping is always consistent with the rankings stored in the votes CSV. Re-run it if you rebuild the bundle.
 
+## Multilingual UI & Open Query Translation
+
+The voting interface is available in **English, Spanish, and Catalan**. Participants switch language with the EN / ES / CA buttons in the top-right corner. Predefined query labels are translated for display only — the English canonical key is always sent to CLIP, so retrieval results are unaffected by the UI language.
+
+### Open queries in ES/CA
+
+When a participant types a free query in Spanish or Catalan, the server automatically translates it to English before passing it to the CLIP text encoder. Translation is done via the **Scaleway Generative API** (Mistral-small, OpenAI-compatible).
+
+**Required environment variable:**
+
+```bash
+export SCW_SECRET_KEY=your_scaleway_api_key
+```
+
+If you run the server inside a virtualenv, add the line to `venv/bin/activate` so it is set on every activation:
+
+```bash
+echo 'export SCW_SECRET_KEY=your_scaleway_api_key' >> venv/bin/activate
+```
+
+The server will return HTTP 503 for translation requests if the variable is not set.
+
+**How it works:**
+
+1. Participant types a query in ES/CA and hits Search.
+2. The browser calls `POST /api/translate` with `{text, source_lang}`.
+3. The server checks the database for an existing translation of that exact text+lang pair.
+4. If none exists, it calls the Mistral API and stores the result as **pending**.
+5. The translated English query is used immediately for CLIP retrieval for that participant.
+6. A small hint (`→ nurse`) appears below the input field so the participant can see what was sent to the model.
+
+**Quick test** (server must be running):
+
+```bash
+curl -s -X POST http://localhost:8080/api/translate \
+  -H "Content-Type: application/json" \
+  -d '{"text": "enfermera", "source_lang": "es"}' | python3 -m json.tool
+# → {"translation": "nurse", "status": "pending"}
+```
+
+### Admin translation moderation
+
+New translations are **pending** by default and are visible only to the participant who typed them. An admin must approve a translation before it appears in everyone's query suggestion list.
+
+Open the admin panel → **"Open Query Translations"** section:
+
+- **Pending** tab — translations waiting for review.
+- You can edit the English text in the table before approving (e.g. to fix a mistranslation).
+- Click **Approve** → the English translation is added to the shared query list for all participants.
+- Click **Reject** → the query stays invisible to other participants.
+
+Admin API endpoints (require `X-Admin-Token` header or `?token=` query param):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/admin/translations?status=pending` | List translations (filter: `pending`, `approved`, `rejected`, or omit for all) |
+| `POST` | `/api/admin/translations/{id}/approve` | Approve; optionally pass `{"translation": "edited text"}` in body |
+| `POST` | `/api/admin/translations/{id}/reject` | Reject |
+
 ## Project Structure
 
 ```
