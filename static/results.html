@@ -71,8 +71,9 @@ table { border-collapse: collapse; }
   border-bottom: 1px solid #374151;
   border-left: 2px solid #4b5563;
 }
-.pair-top  { font-size: 11px; font-weight: 700; color: #fca5a5; white-space: nowrap; }
-.pair-sub  { font-size: 11px; font-weight: 700; color: #93c5fd; white-space: nowrap; }
+.pair-top  { font-size: 11px; font-weight: 700; color: #93c5fd; white-space: nowrap; }
+.pair-vs   { font-size: 10px; font-weight: 400; color: #f9fafb; white-space: nowrap; }
+.pair-sub  { font-size: 11px; font-weight: 700; color: #fca5a5; white-space: nowrap; }
 
 /* Session sub-header (row 2) */
 .th-session {
@@ -211,7 +212,8 @@ function render(data) {
     const ma = parts[0], mb = parts.slice(1).join(' vs ');
     html += `<th class="th-pair-group" colspan="${colsPerPair}">
       <div class="pair-top">${label(ma)}</div>
-      <div class="pair-sub">vs ${label(mb)}</div>
+      <div class="pair-vs">vs</div>
+      <div class="pair-sub">${label(mb)}</div>
     </th>`;
   });
   html += '</tr>';
