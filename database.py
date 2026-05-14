@@ -1,7 +1,7 @@
 from __future__ import annotations
 """
 Database layer — SQLite via aiosqlite for async access.
-Tables: participants, votes, elo_ratings, retrieval_cache, sessions, workshops
+Tables: participants, votes, elo_ratings, retrieval_cache, sessions
 """
 
 import csv
@@ -33,17 +33,6 @@ async def init_db():
                 started_at REAL NOT NULL,
                 stopped_at REAL,
                 created_at REAL NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS workshops (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                location TEXT,
-                date TEXT,
-                community_context TEXT,
-                facilitator TEXT,
-                notes TEXT,
-                created_at REAL
             );
 
             CREATE TABLE IF NOT EXISTS votes (
@@ -87,8 +76,6 @@ async def init_db():
         # Migrations for columns added after initial schema
         for col, defn in [
             ("session_id", "TEXT"),
-            ("query_category", "TEXT"),
-            ("workshop_id", "INTEGER"),
         ]:
             try:
                 await db.execute(f"ALTER TABLE votes ADD COLUMN {col} {defn}")
@@ -447,67 +434,11 @@ async def get_sessions() -> list[dict]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Workshops
-# ═══════════════════════════════════════════════════════════════════════════
-
-async def create_workshop(
-    name: str,
-    location: str = "",
-    date: str = "",
-    community_context: str = "",
-    facilitator: str = "",
-    notes: str = "",
-) -> dict:
-    """Insert a new workshop and return it with its generated id."""
-    now = time.time()
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            """INSERT INTO workshops (name, location, date, community_context, facilitator, notes, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (name, location, date, community_context, facilitator, notes, now),
-        )
-        workshop_id = cursor.lastrowid
-        await db.commit()
-    return {
-        "id": workshop_id,
-        "name": name,
-        "location": location,
-        "date": date,
-        "community_context": community_context,
-        "facilitator": facilitator,
-        "notes": notes,
-        "created_at": now,
-    }
-
-
-async def get_workshops() -> list[dict]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
-            SELECT w.*, COUNT(v.id) as vote_count
-            FROM workshops w
-            LEFT JOIN votes v ON v.workshop_id = w.id
-            GROUP BY w.id
-            ORDER BY w.created_at DESC
-        """)
-        rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
-
-
-async def get_workshop(workshop_id: int) -> dict | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM workshops WHERE id = ?", (workshop_id,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 #  Analysis export
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def export_for_analysis() -> str:
-    """Return CSV for analysis: votes joined with workshop info."""
+    """Return CSV for analysis: votes joined with session info."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
@@ -515,20 +446,19 @@ async def export_for_analysis() -> str:
                 v.id            AS vote_id,
                 v.participant_id,
                 v.query,
-                v.query_category,
                 v.model_a,
                 v.model_b,
                 v.winner,
                 v.position_a,
                 CASE WHEN v.position_a = 'left'  THEN v.images_a ELSE v.images_b END AS ranking_left,
                 CASE WHEN v.position_a = 'left'  THEN v.images_b ELSE v.images_a END AS ranking_right,
-                v.workshop_id,
-                w.name              AS workshop_name,
-                w.community_context,
                 v.session_id,
+                s.name          AS session_name,
+                s.started_at    AS session_started_at,
+                s.stopped_at    AS session_stopped_at,
                 v.timestamp
             FROM votes v
-            LEFT JOIN workshops w ON w.id = v.workshop_id
+            LEFT JOIN sessions s ON s.id = v.session_id
             ORDER BY v.timestamp
         """)
         rows = await cursor.fetchall()

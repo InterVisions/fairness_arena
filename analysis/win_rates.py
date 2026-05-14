@@ -2,7 +2,7 @@
 win_rates.py
 ============
 Compute win rates (left wins / ties / right wins) per model pair,
-stratified by workshop/community_context and by query_category.
+stratified by session and by query.
 
 Inputs
 ------
@@ -10,9 +10,9 @@ Inputs
 
 Outputs
 -------
-  win_rates_by_workshop.csv  - 7 pairs x N workshops
-  win_rates_by_query.csv     - 7 pairs x 4 query categories
-  win_rates_overall.csv      - 7 pairs overall
+  win_rates_overall.csv      - pairs overall
+  win_rates_by_session.csv   - pairs x N sessions
+  win_rates_by_query.csv     - pairs x queries
 
 Wilson score 95% CI is included for each win/loss/tie proportion.
 """
@@ -114,34 +114,33 @@ def main():
     overall_rows = counts_to_rows(aggregate(all_rows))
     write_csv(overall_rows, "win_rates_overall.csv")
 
-    by_workshop: dict[str, list] = defaultdict(list)
+    by_session: dict[str, list] = defaultdict(list)
     for row in all_rows:
-        wid   = row.get("workshop_id") or "none"
-        wname = row.get("workshop_name") or "unknown"
-        ctx   = row.get("community_context") or "unknown"
-        key   = f"{wid}|{wname}|{ctx}"
-        by_workshop[key].append(row)
+        sid   = row.get("session_id") or "none"
+        sname = row.get("session_name") or "unknown"
+        key   = f"{sid}|{sname}"
+        by_session[key].append(row)
 
-    workshop_out = []
-    for key, rows in by_workshop.items():
-        wid, wname, ctx = key.split("|", 2)
+    session_out = []
+    for key, rows in by_session.items():
+        sid, sname = key.split("|", 1)
         counts = aggregate(rows)
-        workshop_out.extend(counts_to_rows(
+        session_out.extend(counts_to_rows(
             counts,
-            extra_cols={"workshop_id": wid, "workshop_name": wname, "community_context": ctx},
+            extra_cols={"session_id": sid, "session_name": sname},
         ))
-    write_csv(workshop_out, "win_rates_by_workshop.csv")
+    write_csv(session_out, "win_rates_by_session.csv")
 
-    by_cat: dict[str, list] = defaultdict(list)
+    by_query: dict[str, list] = defaultdict(list)
     for row in all_rows:
-        cat = row.get("query_category") or "unknown"
-        by_cat[cat].append(row)
+        q = row.get("query") or "unknown"
+        by_query[q].append(row)
 
-    cat_out = []
-    for cat, rows in sorted(by_cat.items()):
+    query_out = []
+    for q, rows in sorted(by_query.items()):
         counts = aggregate(rows)
-        cat_out.extend(counts_to_rows(counts, extra_cols={"query_category": cat}))
-    write_csv(cat_out, "win_rates_by_query.csv")
+        query_out.extend(counts_to_rows(counts, extra_cols={"query": q}))
+    write_csv(query_out, "win_rates_by_query.csv")
 
 
 if __name__ == "__main__":

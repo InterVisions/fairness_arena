@@ -36,8 +36,7 @@ ENGINE = None  # RetrievalEngine instance
 ADMIN_TOKEN = "changeme"  # Set via --admin-token
 BUNDLE_PATH = None        # Explicit single-bundle path (legacy)
 BUNDLES_DIR = None        # Directory containing per-dataset bundles
-ACTIVE_SESSION = None     # Currently running workshop session (dict or None)
-ACTIVE_WORKSHOP = None    # Currently active workshop for data collection (dict or None)
+ACTIVE_SESSION = None     # Currently running session (dict or None)
 
 app = FastAPI(title="Fairness Arena")
 
@@ -248,8 +247,6 @@ async def api_vote(request: Request):
 
     if ACTIVE_SESSION:
         vote["session_id"] = ACTIVE_SESSION["id"]
-    if ACTIVE_WORKSHOP:
-        vote["workshop_id"] = ACTIVE_WORKSHOP["id"]
 
     k = CONFIG["arena"].get("elo_k_factor", 32)
     initial = CONFIG["arena"].get("elo_initial_rating", 1500)
@@ -339,8 +336,8 @@ async def api_admin_export(request: Request):
     )
 
 
-async def _load_votes_and_workshops():
-    """Fetch all votes joined with workshop info as a list of dicts."""
+async def _load_votes():
+    """Fetch all votes joined with session info as a list of dicts."""
     import csv, io
     csv_str = await db.export_for_analysis()
     return list(csv.DictReader(io.StringIO(csv_str)))
@@ -379,24 +376,23 @@ async def results_page():
 
 @app.get("/api/live_results")
 async def api_live_results():
-    """Win rates per model pair x workshop. Public, no auth."""
+    """Win rates per model pair x session. Public, no auth."""
     import time
     from collections import defaultdict, OrderedDict
 
-    rows = await _load_votes_and_workshops()
+    rows = await _load_votes()
 
-    workshops_seen: dict = OrderedDict()
+    sessions_seen: dict = OrderedDict()
     for v in rows:
-        wid = v.get("workshop_id", "")
-        if wid and wid not in workshops_seen:
-            workshops_seen[wid] = {
-                "id":                wid,
-                "name":              v.get("workshop_name") or f"Workshop {wid}",
-                "community_context": v.get("community_context") or "",
+        sid = v.get("session_id", "")
+        if sid and sid not in sessions_seen:
+            sessions_seen[sid] = {
+                "id":   sid,
+                "name": v.get("session_name") or f"Session {sid}",
             }
 
-    workshops  = list(workshops_seen.values())
-    cell_data  = _tally(rows, lambda v: v.get("workshop_id") or "none")
+    sessions  = list(sessions_seen.values())
+    cell_data = _tally(rows, lambda v: v.get("session_id") or "none")
 
     pair_set = {tuple(p) for p in CONFIG.get("arena", {}).get("allowed_pairs", [])}
     overall: dict = defaultdict(_empty_bucket)
@@ -409,12 +405,12 @@ async def api_live_results():
         overall[f"{ma} vs {mb}"][bucket] += 1
 
     return {
-        "workshops":       workshops,
-        "data":            cell_data,
-        "overall":         dict(overall),
-        "total_votes":     len(rows),
-        "last_updated":    time.time(),
-        "active_workshop": ACTIVE_WORKSHOP,
+        "sessions":       sessions,
+        "data":           cell_data,
+        "overall":        dict(overall),
+        "total_votes":    len(rows),
+        "last_updated":   time.time(),
+        "active_session": ACTIVE_SESSION,
     }
 
 
@@ -423,9 +419,9 @@ async def api_live_results_by_query():
     """Win rates per model pair x query_category. Public, no auth."""
     import time
 
-    rows      = await _load_votes_and_workshops()
-    cats      = sorted({v.get("query_category") or "unknown" for v in rows})
-    cell_data = _tally(rows, lambda v: v.get("query_category") or "unknown")
+    rows      = await _load_votes()
+    cats      = sorted({v.get("query") or "unknown" for v in rows})
+    cell_data = _tally(rows, lambda v: v.get("query") or "unknown")
 
     return {
         "categories":   cats,
@@ -507,7 +503,7 @@ async def api_live_results_full():
 
 @app.get("/api/export_analysis")
 async def api_export_analysis(request: Request):
-    """Export votes joined with workshop metadata for analysis scripts."""
+    """Export votes joined with session metadata for analysis scripts."""
     check_admin(request)
     csv_data = await db.export_for_analysis()
     return Response(
@@ -518,58 +514,6 @@ async def api_export_analysis(request: Request):
 
 
 # ── Workshop endpoints ─────────────────────────────────────────────────────
-
-@app.post("/api/workshop/create")
-async def api_workshop_create(request: Request):
-    """Create a new workshop record and return it (including its id)."""
-    check_admin(request)
-    body = await request.json()
-    name = body.get("name", "").strip()
-    if not name:
-        raise HTTPException(400, "name is required")
-    workshop = await db.create_workshop(
-        name=name,
-        location=body.get("location", ""),
-        date=body.get("date", ""),
-        community_context=body.get("community_context", ""),
-        facilitator=body.get("facilitator", ""),
-        notes=body.get("notes", ""),
-    )
-    log.info(f"Workshop created: '{name}' (id={workshop['id']})")
-    return workshop
-
-
-@app.post("/api/workshop/set_active")
-async def api_workshop_set_active(request: Request):
-    """Set the active workshop. All subsequent votes will link to this workshop_id."""
-    global ACTIVE_WORKSHOP
-    check_admin(request)
-    body = await request.json()
-    workshop_id = body.get("workshop_id")
-    if workshop_id is None:
-        raise HTTPException(400, "workshop_id is required")
-    workshop = await db.get_workshop(int(workshop_id))
-    if workshop is None:
-        raise HTTPException(404, f"Workshop {workshop_id} not found")
-    ACTIVE_WORKSHOP = workshop
-    log.info(f"Active workshop set: '{workshop['name']}' (id={workshop['id']})")
-    return {"status": "ok", "active_workshop": ACTIVE_WORKSHOP}
-
-
-@app.post("/api/workshop/clear_active")
-async def api_workshop_clear_active(request: Request):
-    """Unset the active workshop (stop linking votes to a workshop)."""
-    global ACTIVE_WORKSHOP
-    check_admin(request)
-    ACTIVE_WORKSHOP = None
-    return {"status": "ok", "active_workshop": None}
-
-
-@app.get("/api/workshop/list")
-async def api_workshop_list(request: Request):
-    check_admin(request)
-    workshops = await db.get_workshops()
-    return {"workshops": workshops, "active_workshop": ACTIVE_WORKSHOP}
 
 
 @app.get("/api/admin/sessions")
@@ -735,7 +679,7 @@ def load_config(path: str) -> dict:
 
 
 async def startup():
-    global ENGINE, CONFIG, ACTIVE_SESSION, ACTIVE_WORKSHOP
+    global ENGINE, CONFIG, ACTIVE_SESSION
 
     # Init database
     await db.init_db()

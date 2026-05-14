@@ -1,17 +1,17 @@
 """
 community_analysis.py
 =====================
-Test whether different workshops/communities perceive fairness differently.
+Test whether different sessions perceive fairness differently.
 
 For each model pair contrast, performs a chi-square test on the 3xN contingency
-table (vote outcome: left/tie/right) x workshops.
+table (vote outcome: left/tie/right) x sessions.
 
 Inputs
 ------
   --votes   Path to analysis export CSV  (default: ../data/analysis_export.csv)
 
-Output: community_differences.csv
-  pair, workshop_a, workshop_b, chi2, p_value, cramers_v, n, significant_05
+Output: session_differences.csv
+  pair, session_a, session_b, chi2, p_value, cramers_v, n, significant_05
 """
 
 from __future__ import annotations
@@ -100,9 +100,9 @@ def main():
 
     for row in all_rows:
         pair   = f"{row.get('model_a','')} vs {row.get('model_b','')}"
-        wlabel = row.get("workshop_name") or row.get("workshop_id") or "unknown"
+        slabel = row.get("session_name") or row.get("session_id") or "unknown"
         oc     = outcome(row)
-        pair_workshop_counts[pair][wlabel][oc] += 1
+        pair_workshop_counts[pair][slabel][oc] += 1
 
     results = []
 
@@ -121,9 +121,9 @@ def main():
             cv = cramers_v(chi2, n, rows=2, cols=3)
 
             results.append({
-                "pair":           pair,
-                "workshop_a":     wa,
-                "workshop_b":     wb,
+                "pair":      pair,
+                "session_a": wa,
+                "session_b": wb,
                 "n_a":            sum(counts_a),
                 "n_b":            sum(counts_b),
                 "n":              n,
@@ -133,7 +133,7 @@ def main():
                 "significant_05": (pval < 0.05)  if not math.isnan(pval) else "",
             })
 
-    outpath = "community_differences.csv"
+    outpath = "session_differences.csv"
     if results:
         with open(outpath, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=list(results[0].keys()))
@@ -141,7 +141,7 @@ def main():
             writer.writerows(results)
         print(f"Written {len(results)} rows -> {outpath}")
     else:
-        print("No pairwise comparisons found (need >= 2 workshops with data).")
+        print("No pairwise comparisons found (need >= 2 sessions with data).")
 
 
 if __name__ == "__main__":

@@ -68,11 +68,10 @@ def make_table1(df: pd.DataFrame, out: str = "table1_win_rates.csv"):
     return t1
 
 
-# ── Table 2: Win rates by workshop ────────────────────────────────────────
+# ── Table 2: Win rates by session ─────────────────────────────────────────
 
-def make_table2(df: pd.DataFrame, out: str = "table2_by_workshop.csv"):
-    cols = ["pair", "workshop_name", "community_context", "n",
-            "pct_left", "pct_tie", "pct_right"]
+def make_table2(df: pd.DataFrame, out: str = "table2_by_session.csv"):
+    cols = ["pair", "session_name", "n", "pct_left", "pct_tie", "pct_right"]
     available = [c for c in cols if c in df.columns]
     t2 = df[available].copy()
     t2.to_csv(out, index=False)
@@ -119,15 +118,15 @@ def fig_forest(df: pd.DataFrame, out: str = "figure1_forest.png"):
     print(f"Figure 1 → {out}")
 
 
-# ── Figure 2: Heatmap workshop × contrast ────────────────────────────────
+# ── Figure 2: Heatmap session × contrast ─────────────────────────────────
 
 def fig_heatmap(df: pd.DataFrame, out: str = "figure2_heatmap.png"):
-    if "workshop_name" not in df.columns or df["workshop_name"].isna().all():
-        print("Figure 2 skipped — no workshop data available.")
+    if "session_name" not in df.columns or df["session_name"].isna().all():
+        print("Figure 2 skipped — no session data available.")
         return
 
     pivot = df.pivot_table(
-        index="workshop_name", columns="pair", values="pct_left", aggfunc="mean"
+        index="session_name", columns="pair", values="pct_left", aggfunc="mean"
     )
     if pivot.empty:
         print("Figure 2 skipped — pivot is empty.")
@@ -147,7 +146,7 @@ def fig_heatmap(df: pd.DataFrame, out: str = "figure2_heatmap.png"):
             if not math.isnan(v):
                 ax.text(c, r, f"{v:.2f}", ha="center", va="center", fontsize=7,
                         color="black" if 0.25 < v < 0.75 else "white")
-    ax.set_title("Figure 2 — Left-side win rate: workshop × model pair")
+    ax.set_title("Figure 2 — Left-side win rate: session × model pair")
     plt.tight_layout()
     plt.savefig(out, dpi=150)
     plt.close()
@@ -203,15 +202,15 @@ def main():
         return str(outdir / name)
 
     overall_df   = load("win_rates_overall.csv")
-    workshop_df  = load("win_rates_by_workshop.csv")
+    session_df   = load("win_rates_by_session.csv")
     alignment_df = load("alignment_results.csv")
 
     make_table1(overall_df,   out("table1_win_rates.csv"))
-    make_table2(workshop_df,  out("table2_by_workshop.csv"))
+    make_table2(session_df,   out("table2_by_session.csv"))
     make_table3(alignment_df, out("table3_correlations.csv"))
 
     fig_forest(overall_df,   out("figure1_forest.png"))
-    fig_heatmap(workshop_df, out("figure2_heatmap.png"))
+    fig_heatmap(session_df,  out("figure2_heatmap.png"))
     fig_scatter(alignment_df, out("figure3_scatter.png"))
 
     print("\nAll tables and figures generated.")

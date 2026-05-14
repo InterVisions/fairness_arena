@@ -43,15 +43,10 @@ DISALLOWED_PAIRS = [
 QUERIES = ["nurse", "doctor", "terrorist", "caretaker", "activist",
            "attractive", "criminal", "hero", "homeless", "rich"]
 
-WORKSHOPS = [
-    {"name": "Group A", "location": "Barcelona", "date": "2026-05-14",
-     "community_context": "LGBTQ+", "facilitator": "Ana"},
-    {"name": "Group B", "location": "Madrid",    "date": "2026-05-15",
-     "community_context": "Roma",   "facilitator": "Pedro"},
-]
+SESSIONS = ["Group A — Barcelona", "Group B — Madrid"]
 
 
-def make_vote(model_a, model_b, workshop_id=None, query=None):
+def make_vote(model_a, model_b, session_id=None, query=None):
     return {
         "participant_id": f"p{random.randint(1000, 9999)}",
         "query":          query or random.choice(QUERIES),
@@ -64,8 +59,7 @@ def make_vote(model_a, model_b, workshop_id=None, query=None):
         "images_a":       list(range(6)),
         "images_b":       list(range(6, 12)),
         "session_meta":   {},
-        "session_id":     None,
-        "workshop_id":    workshop_id,
+        "session_id":     session_id,
     }
 
 
@@ -77,14 +71,14 @@ def test_tally_filters_allowed_pairs():
     server.CONFIG = {"arena": {"allowed_pairs": [list(p) for p in ALLOWED_PAIRS]}}
 
     rows = (
-        [{"model_a": ma, "model_b": mb, "winner": "A", "workshop_id": "1"}
+        [{"model_a": ma, "model_b": mb, "winner": "A", "session_id": "s1"}
          for ma, mb in ALLOWED_PAIRS]
         +
-        [{"model_a": ma, "model_b": mb, "winner": "A", "workshop_id": "1"}
+        [{"model_a": ma, "model_b": mb, "winner": "A", "session_id": "s1"}
          for ma, mb in DISALLOWED_PAIRS]
     )
 
-    result = server._tally(rows, lambda v: v.get("workshop_id") or "none")
+    result = server._tally(rows, lambda v: v.get("session_id") or "none")
 
     for ma, mb in ALLOWED_PAIRS:
         key = f"{ma} vs {mb}"
@@ -103,7 +97,7 @@ def test_tally_empty_allowed_pairs_passes_all():
     server.CONFIG = {"arena": {"allowed_pairs": []}}
 
     all_pairs = ALLOWED_PAIRS + DISALLOWED_PAIRS
-    rows = [{"model_a": ma, "model_b": mb, "winner": "A", "workshop_id": "1"}
+    rows = [{"model_a": ma, "model_b": mb, "winner": "A", "session_id": "s1"}
             for ma, mb in all_pairs]
 
     result = server._tally(rows, lambda v: "all")
@@ -167,16 +161,13 @@ async def test_allowed_pairs_end_to_end(tmp_db: str):
     await db.init_db()
     server.CONFIG = {"arena": {"allowed_pairs": [list(p) for p in ALLOWED_PAIRS]}}
 
-    workshop = await db.create_workshop(name="Test", community_context="Test")
-    wid = workshop["id"]
-
     n_each = 5
     for ma, mb in ALLOWED_PAIRS:
         for _ in range(n_each):
-            await db.record_vote(make_vote(ma, mb, workshop_id=wid))
+            await db.record_vote(make_vote(ma, mb, session_id="test-session"))
     for ma, mb in DISALLOWED_PAIRS:
         for _ in range(n_each):
-            await db.record_vote(make_vote(ma, mb, workshop_id=wid))
+            await db.record_vote(make_vote(ma, mb, session_id="test-session"))
 
     csv_str = await db.export_for_analysis()
     rows = list(csv.DictReader(io.StringIO(csv_str)))
@@ -196,39 +187,39 @@ async def test_allowed_pairs_end_to_end(tmp_db: str):
     print(f"  [OK] {total} votes inserted; tally exposes only {len(ALLOWED_PAIRS)} allowed pairs")
 
 
-# ── Integration test: workshops and vote recording ────────────────────────────
+# ── Integration test: session vote recording ──────────────────────────────────
 
-async def test_workshop_vote_recording(tmp_db: str):
-    """Workshops are created; votes are recorded and export joins metadata correctly."""
+async def test_session_vote_recording(tmp_db: str):
+    """Sessions are created; votes are recorded and export joins session metadata."""
     db.DB_PATH = Path(tmp_db)
     await db.init_db()
 
-    workshop_ids = []
-    for w in WORKSHOPS:
-        workshop = await db.create_workshop(**w)
-        workshop_ids.append(workshop["id"])
+    session_ids = []
+    for name in SESSIONS:
+        session = await db.create_session(name)
+        session_ids.append(session["id"])
 
     n_votes = 10
-    for wid in workshop_ids:
+    for sid in session_ids:
         for ma, mb in random.choices(ALLOWED_PAIRS, k=n_votes):
-            await db.record_vote(make_vote(ma, mb, workshop_id=wid))
+            await db.record_vote(make_vote(ma, mb, session_id=sid))
 
     csv_str = await db.export_for_analysis()
     rows = list(csv.DictReader(io.StringIO(csv_str)))
 
-    expected = len(workshop_ids) * n_votes
+    expected = len(session_ids) * n_votes
     assert len(rows) == expected, f"Expected {expected} votes, got {len(rows)}"
 
-    workshops_seen = {r["workshop_id"] for r in rows if r["workshop_id"]}
-    assert len(workshops_seen) == len(WORKSHOPS), (
-        f"Expected {len(WORKSHOPS)} workshops, got {len(workshops_seen)}"
+    sessions_seen = {r["session_id"] for r in rows if r["session_id"]}
+    assert len(sessions_seen) == len(SESSIONS), (
+        f"Expected {len(SESSIONS)} sessions, got {len(sessions_seen)}"
     )
 
-    contexts = {r["community_context"] for r in rows if r.get("community_context")}
-    assert contexts == {"LGBTQ+", "Roma"}, f"Wrong community contexts: {contexts}"
+    names_seen = {r["session_name"] for r in rows if r.get("session_name")}
+    assert names_seen == set(SESSIONS), f"Wrong session names: {names_seen}"
 
-    print(f"  [OK] {len(rows)} votes across {len(workshops_seen)} workshops")
-    print(f"  [OK] community contexts: {sorted(contexts)}")
+    print(f"  [OK] {len(rows)} votes across {len(sessions_seen)} sessions")
+    print(f"  [OK] session names: {sorted(names_seen)}")
 
 
 # ── Statistical uniformity test ───────────────────────────────────────────────
@@ -340,8 +331,8 @@ async def main(tmp_db_1: str, tmp_db_2: str):
     print("\n[2] allowed_pairs filtering — end-to-end with real DB")
     await test_allowed_pairs_end_to_end(tmp_db_1)
 
-    print("\n[3] Workshop creation and vote recording")
-    await test_workshop_vote_recording(tmp_db_2)
+    print("\n[3] Session creation and vote recording")
+    await test_session_vote_recording(tmp_db_2)
 
     print("\n[4] Pair selection statistical uniformity (n=3000)")
     test_pair_selection_uniformity()
