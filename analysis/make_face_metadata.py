@@ -1,27 +1,31 @@
 """
 make_face_metadata.py
 =====================
-Generate face_metadata.csv from CFD image filenames.
+Generate face_metadata.csv from CFD image filenames stored in a bundle.
 
 CFD filename format: CFD-{race}{gender}-{person_id}-{attractiveness}-{expression}.jpg
-  Race codes:   A=Asian, B=Black, L=Latino/Hispanic, W=White
+  Race codes:   A=Asian, B=Black, L=Latino/Hispanic, W=White, M=Multiracial
   Gender codes: F=Female, M=Male
-
-The image_id assigned to each file is its 0-based index in the sorted file list,
-which matches the order used by load_dataset_from_folder() in retrieval.py.
 
 Usage
 -----
+    # From bundle (recommended — indices are guaranteed to match)
+    python make_face_metadata.py --bundle ../data/arena_bundle_cfd.npz
+
+    # From folder (fallback — assumes same sort order as when bundle was built)
     python make_face_metadata.py --folder /data/datasets/CFD/CFD_balanced50/
-    python make_face_metadata.py --folder /data/datasets/CFD/CFD_balanced50/ --output ../data/face_metadata.csv
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
+from collections import Counter
 from pathlib import Path
+
+import numpy as np
 
 RACE_MAP = {
     "A": "Asian",
@@ -37,8 +41,6 @@ GENDER_MAP = {
 }
 
 EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-
-# CFD-{race}{gender}-{person_id}-...-N.jpg
 _PATTERN = re.compile(r"CFD-([A-Z])([FM])-", re.IGNORECASE)
 
 
@@ -51,28 +53,53 @@ def parse_filename(name: str) -> tuple[str, str]:
     return race, gender
 
 
+def filenames_from_bundle(bundle_path: str) -> list[str]:
+    data = np.load(bundle_path, allow_pickle=False)
+    if "filenames_json" not in data:
+        raise KeyError(
+            "Bundle does not contain 'filenames_json'. "
+            "Rebuild the bundle with the updated precompute.py."
+        )
+    return json.loads(str(data["filenames_json"][0]))
+
+
+def filenames_from_folder(folder: str, max_images: int | None = None) -> list[str]:
+    p = Path(folder)
+    paths = sorted([f for f in p.rglob("*") if f.suffix.lower() in EXTENSIONS])
+    if max_images:
+        paths = paths[:max_images]
+    return [f.name for f in paths]
+
+
+def build_metadata(filenames: list[str]) -> list[dict]:
+    rows = []
+    for fname in filenames:
+        race, gender = parse_filename(fname)
+        rows.append({"filename": fname, "race": race, "gender": gender, "age": "unknown"})
+    return rows
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--folder", required=True, help="Path to CFD image folder")
-    p.add_argument("--output", default="face_metadata.csv")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--bundle", help="Path to .npz bundle (recommended)")
+    src.add_argument("--folder", help="Path to image folder (fallback)")
     p.add_argument("--max-images", type=int, default=None)
+    p.add_argument("--output", default="face_metadata.csv")
     args = p.parse_args()
 
-    folder = Path(args.folder)
-    paths = sorted([p for p in folder.rglob("*") if p.suffix.lower() in EXTENSIONS])
-    if args.max_images:
-        paths = paths[:args.max_images]
+    if args.bundle:
+        filenames = filenames_from_bundle(args.bundle)
+        print(f"Loaded {len(filenames)} filenames from bundle")
+    else:
+        filenames = filenames_from_folder(args.folder, args.max_images)
+        print(f"Loaded {len(filenames)} filenames from folder")
 
-    rows = []
-    unknown = 0
-    for idx, path in enumerate(paths):
-        race, gender = parse_filename(path.name)
-        if race == "unknown":
-            unknown += 1
-        rows.append({"image_id": idx, "race": race, "gender": gender, "age": "unknown"})
+    rows = build_metadata(filenames)
+    unknown = sum(1 for r in rows if r["race"] == "unknown")
 
     with open(args.output, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["image_id", "race", "gender", "age"])
+        writer = csv.DictWriter(f, fieldnames=["filename", "race", "gender", "age"])
         writer.writeheader()
         writer.writerows(rows)
 
@@ -80,8 +107,6 @@ def main():
     if unknown:
         print(f"  Warning: {unknown} filenames did not match expected CFD pattern")
 
-    # Summary
-    from collections import Counter
     races   = Counter(r["race"]   for r in rows)
     genders = Counter(r["gender"] for r in rows)
     print(f"  Race distribution:   {dict(sorted(races.items()))}")

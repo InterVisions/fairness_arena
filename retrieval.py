@@ -33,6 +33,7 @@ class RetrievalEngine:
         self.image_paths = []     # list of paths or indices for serving
         self.dataset_loaded = False
         self.thumbnails = []      # pre-computed JPEG bytes (from bundle)
+        self.image_filenames = [] # basenames in index order (from bundle)
         self._bundle_model_ids = []
         self._bundle_queries = []
         self._bundle_model_configs = []  # model configs stored in bundle
@@ -296,6 +297,7 @@ class RetrievalEngine:
         self.image_paths = []
         self.dataset_loaded = False
         self.thumbnails = []
+        self.image_filenames = []
         self._bundle_model_ids = []
         self._bundle_queries = []
         self._bundle_model_configs = []
@@ -329,6 +331,7 @@ class RetrievalEngine:
         self._bundle_model_ids = model_ids
         self._bundle_queries = queries
         self._bundle_model_configs = config.get("models", [])
+        self.image_filenames = json.loads(str(data["filenames_json"][0])) if "filenames_json" in data else []
 
         # Thumbnails
         offsets = data["thumbnail_offsets"]

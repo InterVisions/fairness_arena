@@ -307,11 +307,14 @@ def precompute_dataset(ds_cfg: dict, config: dict, output_path: Path,
     log.info(f"\nPacking bundle → {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    filenames = [p.name if p is not None else "" for p in image_paths]
+
     bundle = {
         # Metadata
         "config_json": np.array([json.dumps(config)]),
         "queries_json": np.array([json.dumps(queries)]),
         "model_ids_json": np.array([json.dumps(model_ids)]),
+        "filenames_json": np.array([json.dumps(filenames)]),
         "dataset_id": np.array([ds_id]),
         "n_images": np.array([len(images)]),
 

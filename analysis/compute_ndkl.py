@@ -94,20 +94,31 @@ def max_skew_at_k(topk_labels: list[str], desired_dist: dict[str, float]) -> flo
 
 # ── I/O helpers ───────────────────────────────────────────────────────────
 
-def load_metadata(path: str) -> tuple[dict[int, str], dict[int, str], dict[int, str]]:
-    """Return (gender_map, race_map, age_map): image_id -> label."""
+def load_metadata(path: str) -> tuple[dict, dict, dict]:
+    """Return (gender_map, race_map, age_map) keyed by filename."""
     gender, race, age = {}, {}, {}
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            try:
-                idx = int(row["image_id"])
-            except (KeyError, ValueError):
+            key = row.get("filename") or row.get("image_id")
+            if key is None:
                 continue
-            gender[idx] = row.get("gender", "unknown")
-            race[idx]   = row.get("race",   "unknown")
-            age[idx]    = row.get("age",     "unknown")
+            gender[key] = row.get("gender", "unknown")
+            race[key]   = row.get("race",   "unknown")
+            age[key]    = row.get("age",     "unknown")
     return gender, race, age
+
+
+def load_filenames_from_bundle(bundle_path: str) -> list[str]:
+    """Return ordered list of image basenames from bundle."""
+    import json as _json
+    data = np.load(bundle_path, allow_pickle=False)
+    if "filenames_json" not in data:
+        raise KeyError(
+            "Bundle does not contain 'filenames_json'. "
+            "Rebuild the bundle with the updated precompute.py."
+        )
+    return _json.loads(str(data["filenames_json"][0]))
 
 
 def parse_ranking(json_str: str) -> list[int]:
@@ -136,6 +147,9 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--votes",    default="../data/analysis_export.csv")
     p.add_argument("--metadata", default="../data/face_metadata.csv")
+    p.add_argument("--bundle",   default=None,
+                   help="Path to .npz bundle — used to map integer indices to filenames. "
+                        "Required when face_metadata.csv uses filename keys (recommended).")
     p.add_argument("--output",   default="automated_metrics.csv")
     p.add_argument("--k",        type=int, default=50)
     args = p.parse_args()
@@ -143,11 +157,25 @@ def main():
     if not Path(args.metadata).exists():
         raise FileNotFoundError(
             f"face_metadata.csv not found at {args.metadata}. "
-            "Create a CSV with columns: image_id, race, gender, age "
-            "(one row per image in the dataset, matching stored ranking indices)."
+            "Run make_face_metadata.py --bundle <bundle.npz> first."
         )
 
     gender_map, race_map, age_map = load_metadata(args.metadata)
+
+    # If metadata is filename-keyed, build idx->key via bundle
+    first_key = next(iter(gender_map))
+    if not isinstance(first_key, int) and not first_key.isdigit():
+        # filename-keyed metadata: need bundle to resolve integer indices
+        if not args.bundle:
+            raise SystemExit(
+                "face_metadata.csv uses filename keys. "
+                "Pass --bundle path/to/bundle.npz to map indices to filenames."
+            )
+        filenames = load_filenames_from_bundle(args.bundle)
+        gender_map = {i: gender_map.get(fn, "unknown") for i, fn in enumerate(filenames)}
+        race_map   = {i: race_map.get(fn,   "unknown") for i, fn in enumerate(filenames)}
+        age_map    = {i: age_map.get(fn,    "unknown") for i, fn in enumerate(filenames)}
+        print(f"Loaded {len(filenames)} filenames from bundle")
 
     # Build per-attribute uniform desired distributions over all known groups
     desired = {
