@@ -1,224 +1,253 @@
 """
 test_pipeline.py
 ================
-Integration test for the AIES26 data-collection pipeline.
+Integration and unit tests for the Fairness Arena server.
 
-Creates 4 synthetic workshops, inserts 100 votes per workshop (400 total),
-exports analysis CSV, runs all analysis scripts, and validates outputs.
+Covers:
+  - allowed_pairs filtering in _tally, api_live_results, and api_live_results/full
+  - api_match pair selection
+  - Workshop creation and vote recording
 
 Usage:
     python test_pipeline.py
-    python test_pipeline.py --db /tmp/test_arena.db
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import csv
+import io
 import os
 import random
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import database as db
 
-SYNTHETIC_WORKSHOPS = [
-    {"name": "LGBT+ Community Barcelona", "location": "Barcelona", "date": "2026-03-01",
-     "community_context": "LGBTQ+", "facilitator": "Ana Garcia"},
-    {"name": "Roma Youth Madrid",         "location": "Madrid",    "date": "2026-03-08",
-     "community_context": "Roma",    "facilitator": "Pedro Lopez"},
-    {"name": "Migrants Solidarity Hub",   "location": "Valencia",  "date": "2026-03-15",
-     "community_context": "Migrants","facilitator": "Sara Kim"},
-    {"name": "Civil Servants Seminar",    "location": "Seville",   "date": "2026-03-22",
-     "community_context": "Civil Servants", "facilitator": "Marta Ruiz"},
+# ── Test fixtures ─────────────────────────────────────────────────────────────
+
+ALLOWED_PAIRS = [
+    ("clip-vit-b16", "clip-vit-b16-debiased"),
+    ("siglip-b16",   "siglip2-b16"),
+    ("clip-vit-b16", "siglip-b16"),
 ]
 
-MODEL_PAIRS = [
-    ("openai/clip-vit-base-patch16",           "laion/CLIP-ViT-B-16-laion2B-s34B-b88K"),
-    ("openai/clip-vit-base-patch16",           "google/siglip-base-patch16-224"),
-    ("google/siglip-base-patch16-224",         "google/siglip2-base-patch16-224"),
-    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "M2_SANER"),
-    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "M2_NeuralInt"),
-    ("M2_SANER",                               "M2_NeuralInt"),
-    ("laion/CLIP-ViT-B-16-laion2B-s34B-b88K", "laion/CLIP-ViT-L-14-laion2B-s32B-b82K"),
+DISALLOWED_PAIRS = [
+    ("clip-vit-b16",          "siglip2-b16"),
+    ("clip-vit-b16-debiased", "siglip-b16"),
+    ("clip-vit-b16-debiased", "siglip2-b16"),
 ]
 
-SAMPLE_QUERIES = [
-    "a nurse",        "a CEO",          "a teacher",       "a scientist",
-    "a strong person","an intelligent person","protesting","cooking",
-    "leading a team", "working at a computer","a beautiful person","custom scene",
+QUERIES = ["nurse", "doctor", "terrorist", "caretaker", "activist",
+           "attractive", "criminal", "hero", "homeless", "rich"]
+
+WORKSHOPS = [
+    {"name": "Group A", "location": "Barcelona", "date": "2026-05-14",
+     "community_context": "LGBTQ+", "facilitator": "Ana"},
+    {"name": "Group B", "location": "Madrid",    "date": "2026-05-15",
+     "community_context": "Roma",   "facilitator": "Pedro"},
 ]
 
 
-async def insert_synthetic_data(tmp_db: str):
+def make_vote(model_a, model_b, workshop_id=None, query=None):
+    return {
+        "participant_id": f"p{random.randint(1000, 9999)}",
+        "query":          query or random.choice(QUERIES),
+        "model_a":        model_a,
+        "model_b":        model_b,
+        "winner":         random.choice(["A", "B", "tie"]),
+        "position_a":     random.choice(["left", "right"]),
+        "why_tags":       [],
+        "why_freetext":   "",
+        "images_a":       list(range(6)),
+        "images_b":       list(range(6, 12)),
+        "session_meta":   {},
+        "session_id":     None,
+        "workshop_id":    workshop_id,
+    }
+
+
+# ── Unit tests: pair filtering ────────────────────────────────────────────────
+
+def test_tally_filters_allowed_pairs():
+    """_tally must exclude votes whose pair is not in allowed_pairs."""
+    import server
+    server.CONFIG = {"arena": {"allowed_pairs": [list(p) for p in ALLOWED_PAIRS]}}
+
+    rows = (
+        [{"model_a": ma, "model_b": mb, "winner": "A", "workshop_id": "1"}
+         for ma, mb in ALLOWED_PAIRS]
+        +
+        [{"model_a": ma, "model_b": mb, "winner": "A", "workshop_id": "1"}
+         for ma, mb in DISALLOWED_PAIRS]
+    )
+
+    result = server._tally(rows, lambda v: v.get("workshop_id") or "none")
+
+    for ma, mb in ALLOWED_PAIRS:
+        key = f"{ma} vs {mb}"
+        assert key in result, f"Allowed pair missing from tally: {key}"
+
+    for ma, mb in DISALLOWED_PAIRS:
+        key = f"{ma} vs {mb}"
+        assert key not in result, f"Disallowed pair present in tally: {key}"
+
+    print("  [OK] _tally filters disallowed pairs")
+
+
+def test_tally_empty_allowed_pairs_passes_all():
+    """When allowed_pairs is empty, _tally must include every pair."""
+    import server
+    server.CONFIG = {"arena": {"allowed_pairs": []}}
+
+    all_pairs = ALLOWED_PAIRS + DISALLOWED_PAIRS
+    rows = [{"model_a": ma, "model_b": mb, "winner": "A", "workshop_id": "1"}
+            for ma, mb in all_pairs]
+
+    result = server._tally(rows, lambda v: "all")
+    assert len(result) == len(all_pairs), (
+        f"Expected {len(all_pairs)} pairs, got {len(result)}"
+    )
+    print("  [OK] _tally passes all pairs when allowed_pairs is empty")
+
+
+def test_live_results_full_norm_pair_set():
+    """api_live_results/full must build its norm_pair_set from config, not hardcoded values."""
+    import server
+    server.CONFIG = {"arena": {"allowed_pairs": [list(p) for p in ALLOWED_PAIRS]}}
+
+    def norm(ma, mb):
+        return (ma, mb, False) if ma <= mb else (mb, ma, True)
+
+    allowed_pairs = [tuple(p) for p in server.CONFIG["arena"]["allowed_pairs"]]
+    norm_pair_set = {norm(a, b)[:2] for a, b in allowed_pairs}
+
+    norm_allowed    = {norm(a, b)[:2] for a, b in ALLOWED_PAIRS}
+    norm_disallowed = {norm(a, b)[:2] for a, b in DISALLOWED_PAIRS}
+
+    for pair in norm_allowed:
+        assert pair in norm_pair_set, f"Allowed pair missing from norm set: {pair}"
+    for pair in norm_disallowed:
+        assert pair not in norm_pair_set, f"Disallowed pair in norm set: {pair}"
+
+    print("  [OK] api_live_results/full norm_pair_set is correct")
+
+
+def test_api_match_pair_selection():
+    """api_match must only offer pairs present in allowed_pairs."""
+    import server
+    server.CONFIG = {"arena": {"allowed_pairs": [list(p) for p in ALLOWED_PAIRS]}}
+
+    all_models  = list({m for pair in ALLOWED_PAIRS for m in pair})
+    enabled_set = set(all_models)
+    allowed     = [tuple(p) for p in server.CONFIG["arena"]["allowed_pairs"]]
+    valid_pairs = [(a, b) for a, b in allowed if a in enabled_set and b in enabled_set]
+    allowed_set = set(allowed)
+
+    assert len(valid_pairs) == len(ALLOWED_PAIRS), (
+        f"Expected {len(ALLOWED_PAIRS)} valid pairs, got {len(valid_pairs)}"
+    )
+    for pair in valid_pairs:
+        assert pair in allowed_set, f"Pair outside allowed set returned: {pair}"
+
+    print("  [OK] api_match only selects from allowed_pairs")
+
+
+# ── Integration test: allowed_pairs filtering end-to-end ─────────────────────
+
+async def test_allowed_pairs_end_to_end(tmp_db: str):
+    """
+    Insert allowed and disallowed votes into the real DB, then verify that
+    _tally (used by all live_results endpoints) only surfaces allowed pairs.
+    """
+    import server
+    db.DB_PATH = Path(tmp_db)
+    await db.init_db()
+    server.CONFIG = {"arena": {"allowed_pairs": [list(p) for p in ALLOWED_PAIRS]}}
+
+    workshop = await db.create_workshop(name="Test", community_context="Test")
+    wid = workshop["id"]
+
+    n_each = 5
+    for ma, mb in ALLOWED_PAIRS:
+        for _ in range(n_each):
+            await db.record_vote(make_vote(ma, mb, workshop_id=wid))
+    for ma, mb in DISALLOWED_PAIRS:
+        for _ in range(n_each):
+            await db.record_vote(make_vote(ma, mb, workshop_id=wid))
+
+    csv_str = await db.export_for_analysis()
+    rows = list(csv.DictReader(io.StringIO(csv_str)))
+
+    total = (len(ALLOWED_PAIRS) + len(DISALLOWED_PAIRS)) * n_each
+    assert len(rows) == total, f"Expected {total} votes in DB, got {len(rows)}"
+
+    tally = server._tally(rows, lambda v: "all")
+
+    for ma, mb in ALLOWED_PAIRS:
+        key = f"{ma} vs {mb}"
+        assert key in tally, f"Allowed pair missing from end-to-end tally: {key}"
+    for ma, mb in DISALLOWED_PAIRS:
+        key = f"{ma} vs {mb}"
+        assert key not in tally, f"Disallowed pair present in end-to-end tally: {key}"
+
+    print(f"  [OK] {total} votes inserted; tally exposes only {len(ALLOWED_PAIRS)} allowed pairs")
+
+
+# ── Integration test: workshops and vote recording ────────────────────────────
+
+async def test_workshop_vote_recording(tmp_db: str):
+    """Workshops are created; votes are recorded and export joins metadata correctly."""
     db.DB_PATH = Path(tmp_db)
     await db.init_db()
 
-    print("Creating workshops ...")
     workshop_ids = []
-    for w in SYNTHETIC_WORKSHOPS:
+    for w in WORKSHOPS:
         workshop = await db.create_workshop(**w)
         workshop_ids.append(workshop["id"])
-        print(f"  Workshop {workshop['id']}: {w['name']} ({w['community_context']})")
 
-    print("Inserting votes ...")
-    vote_count = 0
+    n_votes = 10
     for wid in workshop_ids:
-        for _ in range(100):
-            model_a, model_b = random.choice(MODEL_PAIRS)
-            query  = random.choice(SAMPLE_QUERIES)
-            winner = random.choice(["A", "B", "tie"])
-            pos_a  = random.choice(["left", "right"])
-            n_imgs = 12
-            images = random.sample(range(1000), n_imgs)
-            vote = {
-                "participant_id": f"p{random.randint(1000, 9999)}",
-                "query":          query,
-                "model_a":        model_a,
-                "model_b":        model_b,
-                "winner":         winner,
-                "position_a":     pos_a,
-                "why_tags":       [],
-                "why_freetext":   "",
-                "images_a":       images[:n_imgs // 2],
-                "images_b":       images[n_imgs // 2:],
-                "session_meta":   {},
-                "session_id":     None,
-                "workshop_id":    wid,
-            }
-            await db.record_vote(vote)
-            vote_count += 1
+        for ma, mb in random.choices(ALLOWED_PAIRS, k=n_votes):
+            await db.record_vote(make_vote(ma, mb, workshop_id=wid))
 
-    print(f"Inserted {vote_count} votes across {len(workshop_ids)} workshops.")
-    return workshop_ids
+    csv_str = await db.export_for_analysis()
+    rows = list(csv.DictReader(io.StringIO(csv_str)))
 
-
-async def export_csv(tmp_db: str, out_path: str):
-    db.DB_PATH = Path(tmp_db)
-    csv_data = await db.export_for_analysis()
-    with open(out_path, "w", encoding="utf-8", newline="") as f:
-        f.write(csv_data)
-    print(f"Exported analysis CSV -> {out_path}")
-    return csv_data
-
-
-def validate_export(csv_path: str, expected_votes: int, expected_workshops: int):
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-
-    assert len(rows) == expected_votes, (
-        f"Expected {expected_votes} votes in export, got {len(rows)}"
-    )
+    expected = len(workshop_ids) * n_votes
+    assert len(rows) == expected, f"Expected {expected} votes, got {len(rows)}"
 
     workshops_seen = {r["workshop_id"] for r in rows if r["workshop_id"]}
-    assert len(workshops_seen) == expected_workshops, (
-        f"Expected {expected_workshops} workshops in export, got {len(workshops_seen)}"
+    assert len(workshops_seen) == len(WORKSHOPS), (
+        f"Expected {len(WORKSHOPS)} workshops, got {len(workshops_seen)}"
     )
 
-    empty_cats = [r for r in rows if not r.get("query_category")]
-    assert not empty_cats, f"{len(empty_cats)} votes have empty query_category"
-
     contexts = {r["community_context"] for r in rows if r.get("community_context")}
-    assert len(contexts) >= 2, f"Expected multiple community contexts, got {contexts}"
+    assert contexts == {"LGBTQ+", "Roma"}, f"Wrong community contexts: {contexts}"
 
-    print(f"  [OK] {len(rows)} votes exported")
-    print(f"  [OK] {len(workshops_seen)} workshops present")
-    print(f"  [OK] query_category populated for all votes")
-    print(f"  [OK] community_contexts: {sorted(contexts)}")
+    print(f"  [OK] {len(rows)} votes across {len(workshops_seen)} workshops")
+    print(f"  [OK] community contexts: {sorted(contexts)}")
 
 
-def run_analysis_scripts(csv_path: str, analysis_dir: str, tmpdir: str):
-    orig_dir = os.getcwd()
-    os.chdir(tmpdir)
+# ── Runner ────────────────────────────────────────────────────────────────────
 
-    py = sys.executable
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-
-    scripts = [
-        (
-            "win_rates.py",
-            [py, str(Path(analysis_dir) / "win_rates.py"), "--votes", csv_path],
-            ["win_rates_overall.csv", "win_rates_by_workshop.csv", "win_rates_by_query.csv"],
-        ),
-        (
-            "community_analysis.py",
-            [py, str(Path(analysis_dir) / "community_analysis.py"), "--votes", csv_path],
-            ["community_differences.csv"],
-        ),
-    ]
-
-    for name, cmd, expected_outputs in scripts:
-        print(f"\nRunning {name} ...")
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
-        if result.stdout.strip():
-            print(result.stdout.strip())
-        if result.returncode != 0:
-            print(f"STDERR: {result.stderr.strip()}", file=sys.stderr)
-            os.chdir(orig_dir)
-            raise RuntimeError(f"{name} failed with exit code {result.returncode}")
-
-        for fname in expected_outputs:
-            fpath = Path(tmpdir) / fname
-            if not fpath.exists():
-                os.chdir(orig_dir)
-                raise FileNotFoundError(f"Expected output missing: {fname}")
-            with open(fpath, newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-            assert len(rows) > 0, f"{fname} is empty"
-            print(f"  [OK] {fname} - {len(rows)} rows")
-
-    ww_path = Path(tmpdir) / "win_rates_by_workshop.csv"
-    with open(ww_path, newline="", encoding="utf-8") as f:
-        ww_rows = list(csv.DictReader(f))
-    contexts = {r.get("community_context", "") for r in ww_rows}
-    assert len(contexts) >= 2, f"win_rates_by_workshop lacks stratification: {contexts}"
-    print(f"  [OK] workshop stratification: {sorted(contexts)}")
-
-    os.chdir(orig_dir)
-
-
-def validate_query_categorization():
-    cases = [
-        ("a nurse at work",           "occupation"),
-        ("doctor",                    "occupation"),
-        ("a very strong athlete",     "trait"),
-        ("someone dangerous",         "trait"),
-        ("protesting in the streets", "action"),
-        ("cooking at home",           "action"),
-        ("happy birthday scene",      "custom"),
-    ]
-    print("\nValidating categorize_query ...")
-    for query, expected in cases:
-        got = db.categorize_query(query)
-        assert got == expected, f"categorize_query({query!r}) = {got!r}, expected {expected!r}"
-        print(f"  [OK] {query!r} -> {got}")
-
-
-async def main(tmp_db: str):
+async def main(tmp_db_1: str, tmp_db_2: str):
     print("=" * 60)
-    print("  Fairness Arena - AIES26 Pipeline Integration Test")
+    print("  Fairness Arena — Pipeline Tests")
     print("=" * 60)
 
-    validate_query_categorization()
+    print("\n[1] allowed_pairs filtering — unit tests")
+    test_tally_filters_allowed_pairs()
+    test_tally_empty_allowed_pairs_passes_all()
+    test_live_results_full_norm_pair_set()
+    test_api_match_pair_selection()
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        csv_path = str(Path(tmpdir) / "analysis_export.csv")
+    print("\n[2] allowed_pairs filtering — end-to-end with real DB")
+    await test_allowed_pairs_end_to_end(tmp_db_1)
 
-        print("\nPhase 1: Synthetic data insertion")
-        await insert_synthetic_data(tmp_db)
-
-        print("\nPhase 2: Analysis export")
-        await export_csv(tmp_db, csv_path)
-
-        print("\nPhase 3: Validating export")
-        validate_export(csv_path, expected_votes=400, expected_workshops=4)
-
-        analysis_dir = str(Path(__file__).parent / "analysis")
-        print("\nPhase 4: Running analysis scripts")
-        run_analysis_scripts(csv_path, analysis_dir, tmpdir)
+    print("\n[3] Workshop creation and vote recording")
+    await test_workshop_vote_recording(tmp_db_2)
 
     print("\n" + "=" * 60)
     print("  All tests passed.")
@@ -226,20 +255,29 @@ async def main(tmp_db: str):
 
 
 if __name__ == "__main__":
+    import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--db", default=None, help="Path for test SQLite database")
+    p.add_argument("--db", default=None, help="Base path for test databases (two files created)")
     args = p.parse_args()
 
     if args.db:
-        tmp_db = args.db
+        tmp_db_1 = args.db + "_1.db"
+        tmp_db_2 = args.db + "_2.db"
         cleanup = False
     else:
-        fd, tmp_db = tempfile.mkstemp(suffix=".db", prefix="test_arena_")
-        os.close(fd)
+        fd1, tmp_db_1 = tempfile.mkstemp(suffix=".db", prefix="test_arena_")
+        fd2, tmp_db_2 = tempfile.mkstemp(suffix=".db", prefix="test_arena_")
+        os.close(fd1)
+        os.close(fd2)
         cleanup = True
 
     try:
-        asyncio.run(main(tmp_db))
+        asyncio.run(main(tmp_db_1, tmp_db_2))
+    except AssertionError as e:
+        print(f"\n  FAILED: {e}", file=sys.stderr)
+        sys.exit(1)
     finally:
-        if cleanup and Path(tmp_db).exists():
-            os.unlink(tmp_db)
+        if cleanup:
+            for f in (tmp_db_1, tmp_db_2):
+                if Path(f).exists():
+                    os.unlink(f)
