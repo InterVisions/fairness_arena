@@ -76,8 +76,12 @@ def get_datasets(config: dict) -> list[dict]:
     return [ds]
 
 
-def load_dataset(ds_cfg: dict) -> list[Image.Image]:
-    """Load images from HuggingFace or local folder."""
+def load_dataset(ds_cfg: dict) -> tuple[list[Image.Image], list[Path | None]]:
+    """Load images from HuggingFace or local folder.
+
+    Returns (images, paths) where paths[i] is the source Path for images[i],
+    or None for HuggingFace datasets where no file path is available.
+    """
     source = ds_cfg.get("source", "huggingface")
     max_images = ds_cfg.get("max_images", 2000)
 
@@ -103,22 +107,23 @@ def load_dataset(ds_cfg: dict) -> list[Image.Image]:
                 images.append(img.convert("RGB"))
             else:
                 images.append(Image.open(img).convert("RGB"))
-        return images
+        return images, [None] * len(images)
 
     elif source == "folder":
         folder = Path(ds_cfg["folder_path"])
         extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-        paths = sorted([p for p in folder.rglob("*") if p.suffix.lower() in extensions])
+        all_paths = sorted([p for p in folder.rglob("*") if p.suffix.lower() in extensions])
         if max_images:
-            paths = paths[:max_images]
-        log.info(f"Loading {len(paths)} images from {folder} …")
-        images = []
-        for p in paths:
+            all_paths = all_paths[:max_images]
+        log.info(f"Loading {len(all_paths)} images from {folder} …")
+        images, paths = [], []
+        for p in all_paths:
             try:
                 images.append(Image.open(p).convert("RGB"))
+                paths.append(p)
             except Exception as e:
                 log.warning(f"Failed to load {p}: {e}")
-        return images
+        return images, paths
 
     else:
         raise ValueError(f"Unknown dataset source: {source}")
@@ -190,7 +195,7 @@ def precompute_dataset(ds_cfg: dict, config: dict, output_path: Path,
     log.info(f"{'#'*60}\n")
 
     # ── Load dataset ─────────────────────────────────────────────────
-    images = load_dataset(ds_cfg)
+    images, image_paths = load_dataset(ds_cfg)
     log.info(f"Dataset: {len(images)} images")
 
     # ── Create thumbnails ────────────────────────────────────────────
@@ -212,44 +217,91 @@ def precompute_dataset(ds_cfg: dict, config: dict, output_path: Path,
 
         mid = mcfg["id"]
         model_ids.append(mid)
-        model_name = mcfg["model_name"]
-        pretrained = mcfg.get("pretrained", "openai")
+        backend = mcfg.get("backend", "open_clip")
 
         log.info(f"\n{'='*60}")
-        log.info(f"Model: {mid} ({model_name}, {pretrained})")
+        log.info(f"Model: {mid} (backend={backend})")
         log.info(f"{'='*60}")
 
-        # Load model
-        t0 = time.time()
-        model, _, preprocess = open_clip.create_model_and_transforms(
-            model_name, pretrained=pretrained, device=device
-        )
-        tokenizer = open_clip.get_tokenizer(model_name)
-        model.eval()
-        log.info(f"Model loaded in {time.time() - t0:.1f}s")
+        if backend == "precomputed":
+            # ── Load image embeddings from external pkl ───────────────
+            import pickle
+            pkl_path = Path(mcfg["embeddings_file"])
+            log.info(f"Loading precomputed embeddings from {pkl_path} …")
+            with open(pkl_path, "rb") as f:
+                pkl_embs: dict = pickle.load(f)
 
-        # Embed images
-        log.info("Embedding images …")
-        t0 = time.time()
-        img_embs = embed_images(model, preprocess, images, device, batch_size=batch_size)
-        log.info(f"Image embeddings: {img_embs.shape} in {time.time() - t0:.1f}s")
+            emb_dim = next(iter(pkl_embs.values())).shape[-1]
+            rows = []
+            missing = 0
+            for p in image_paths:
+                fname = p.name if p is not None else None
+                emb = pkl_embs.get(fname) if fname else None
+                if emb is None:
+                    log.warning(f"No embedding for '{fname}', using zeros")
+                    rows.append(np.zeros(emb_dim, dtype=np.float32))
+                    missing += 1
+                else:
+                    rows.append(np.asarray(emb, dtype=np.float32))
+            if missing:
+                log.warning(f"{missing}/{len(image_paths)} images had no entry in pkl")
+
+            img_embs = np.stack(rows)  # (N, D)
+            log.info(f"Image embeddings: {img_embs.shape}")
+
+            # ── Text encoder (shared with the specified open_clip model) ──
+            text_model_name = mcfg.get("text_encoder_model", "ViT-B-16")
+            text_pretrained  = mcfg.get("text_encoder_pretrained", "openai")
+            log.info(f"Loading text encoder: {text_model_name} ({text_pretrained}) …")
+            t0 = time.time()
+            text_model, _, _ = open_clip.create_model_and_transforms(
+                text_model_name, pretrained=text_pretrained, device=device
+            )
+            tokenizer = open_clip.get_tokenizer(text_model_name)
+            text_model.eval()
+            log.info(f"Text encoder loaded in {time.time() - t0:.1f}s")
+
+            query_embs = embed_texts(text_model, tokenizer, queries, device)
+            log.info(f"Query embeddings: {query_embs.shape}")
+
+            del text_model, tokenizer
+            if device == "cuda":
+                torch.cuda.empty_cache()
+
+        else:
+            # ── Standard open_clip model ──────────────────────────────
+            model_name = mcfg["model_name"]
+            pretrained  = mcfg.get("pretrained", "openai")
+            log.info(f"  {model_name} ({pretrained})")
+
+            t0 = time.time()
+            model, _, preprocess = open_clip.create_model_and_transforms(
+                model_name, pretrained=pretrained, device=device
+            )
+            tokenizer = open_clip.get_tokenizer(model_name)
+            model.eval()
+            log.info(f"Model loaded in {time.time() - t0:.1f}s")
+
+            log.info("Embedding images …")
+            t0 = time.time()
+            img_embs = embed_images(model, preprocess, images, device, batch_size=batch_size)
+            log.info(f"Image embeddings: {img_embs.shape} in {time.time() - t0:.1f}s")
+
+            log.info("Embedding queries …")
+            query_embs = embed_texts(model, tokenizer, queries, device)
+            log.info(f"Query embeddings: {query_embs.shape}")
+
+            del model, preprocess, tokenizer
+            if device == "cuda":
+                torch.cuda.empty_cache()
+
         all_image_embs[mid] = img_embs
-
-        # Embed queries
-        log.info("Embedding queries …")
-        query_embs = embed_texts(model, tokenizer, queries, device)
-        log.info(f"Query embeddings: {query_embs.shape}")
 
         # Compute retrievals
         log.info("Computing retrievals …")
         retrievals = compute_retrievals(img_embs, query_embs, queries, top_k)
         all_retrievals[mid] = retrievals
         log.info(f"Retrievals computed for {len(queries)} queries")
-
-        # Free GPU memory
-        del model, preprocess, tokenizer
-        if device == "cuda":
-            torch.cuda.empty_cache()
 
     # ── Pack into bundle ─────────────────────────────────────────────
     log.info(f"\nPacking bundle → {output_path}")

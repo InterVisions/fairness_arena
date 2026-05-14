@@ -194,10 +194,16 @@ class RetrievalEngine:
             import open_clip
             log.info(f"Lazy-loading text encoder for {model_id} …")
             t0 = time.time()
+            if cfg.get("backend") == "precomputed":
+                model_name = cfg.get("text_encoder_model", "ViT-B-16")
+                pretrained  = cfg.get("text_encoder_pretrained", "openai")
+            else:
+                model_name = cfg["model_name"]
+                pretrained  = cfg.get("pretrained", "openai")
             model, _, _ = open_clip.create_model_and_transforms(
-                cfg["model_name"], pretrained=cfg.get("pretrained", "openai"), device=self.device
+                model_name, pretrained=pretrained, device=self.device
             )
-            tokenizer = open_clip.get_tokenizer(cfg["model_name"])
+            tokenizer = open_clip.get_tokenizer(model_name)
             # Discard vision tower — we only need text encoding
             model.visual = None
             model.eval()
