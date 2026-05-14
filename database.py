@@ -71,6 +71,16 @@ async def init_db():
                 similarities TEXT,   -- JSON list of similarity scores
                 computed_at REAL
             );
+
+            CREATE TABLE IF NOT EXISTS open_query_translations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_text TEXT NOT NULL,
+                source_lang TEXT NOT NULL,
+                translation TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at REAL NOT NULL,
+                reviewed_at REAL
+            );
         """)
         await db.commit()
         # Migrations for columns added after initial schema
@@ -470,3 +480,83 @@ async def export_for_analysis() -> str:
         for r in rows:
             writer.writerow(dict(r))
     return output.getvalue()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Open query translations
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def get_translation(original_text: str, source_lang: str) -> dict | None:
+    """Return an existing translation record (any status) or None."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM open_query_translations WHERE original_text=? AND source_lang=?",
+            (original_text, source_lang),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def save_translation(original_text: str, source_lang: str, translation: str) -> dict:
+    """Insert a new pending translation and return it."""
+    now = time.time()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            """INSERT INTO open_query_translations
+               (original_text, source_lang, translation, status, created_at)
+               VALUES (?, ?, ?, 'pending', ?)""",
+            (original_text, source_lang, translation, now),
+        )
+        row_id = cur.lastrowid
+        await db.commit()
+    return {"id": row_id, "original_text": original_text, "source_lang": source_lang,
+            "translation": translation, "status": "pending", "created_at": now}
+
+
+async def list_translations(status: str | None = None) -> list[dict]:
+    """List translations, optionally filtered by status."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if status:
+            cur = await db.execute(
+                "SELECT * FROM open_query_translations WHERE status=? ORDER BY created_at DESC",
+                (status,),
+            )
+        else:
+            cur = await db.execute(
+                "SELECT * FROM open_query_translations ORDER BY created_at DESC"
+            )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def review_translation(row_id: int, status: str, translation: str | None = None) -> dict | None:
+    """Approve or reject a translation, optionally editing the translation text."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if translation:
+            await db.execute(
+                "UPDATE open_query_translations SET status=?, translation=?, reviewed_at=? WHERE id=?",
+                (status, translation, time.time(), row_id),
+            )
+        else:
+            await db.execute(
+                "UPDATE open_query_translations SET status=?, reviewed_at=? WHERE id=?",
+                (status, time.time(), row_id),
+            )
+        await db.commit()
+        cur = await db.execute("SELECT * FROM open_query_translations WHERE id=?", (row_id,))
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def get_approved_translations() -> list[str]:
+    """Return the English translations of all approved open queries."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT translation FROM open_query_translations WHERE status='approved' ORDER BY created_at"
+        )
+        rows = await cur.fetchall()
+        return [r["translation"] for r in rows]

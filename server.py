@@ -14,6 +14,7 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import random
 import time
 from pathlib import Path
@@ -124,11 +125,15 @@ async def api_register(request: Request):
 async def api_config():
     """Return public-facing config (queries, question, etc.)."""
     arena = CONFIG.get("arena", {})
-    # Predefined queries from bundle + any open queries accumulated in DB cache
+    # Predefined queries from bundle + approved open queries (incl. translated ones)
     queries = ENGINE.bundle_queries()
     if arena.get("allow_open_queries", False):
         cached_queries = await db.get_cached_query_list()
         for q in cached_queries:
+            if q not in queries:
+                queries.append(q)
+        approved_en = await db.get_approved_translations()
+        for q in approved_en:
             if q not in queries:
                 queries.append(q)
     return {
@@ -511,6 +516,112 @@ async def api_export_analysis(request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=fairness_arena_analysis.csv"}
     )
+
+
+# ── Translation service ───────────────────────────────────────────────────
+
+async def _translate_with_llm(text: str, source_lang: str) -> str:
+    """Call Scaleway/Mistral API to translate text → English."""
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        raise HTTPException(503, "openai package not installed")
+
+    api_key = os.environ.get("SCW_SECRET_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "SCW_SECRET_KEY environment variable not set")
+
+    client = AsyncOpenAI(
+        base_url="https://api.scaleway.ai/v1",
+        api_key=api_key,
+    )
+    lang_name = {"es": "Spanish", "ca": "Catalan"}.get(source_lang, source_lang)
+    resp = await client.chat.completions.create(
+        model="mistral-small-3.2-24b-instruct-2506",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a translation assistant for an image retrieval research tool. "
+                    f"Translate the given {lang_name} text to English. "
+                    "Use compact, natural terms (e.g. 'nurse', not 'person who works as a nurse'). "
+                    "Keep the translation gender-neutral. "
+                    "Return only the translation, nothing else."
+                ),
+            },
+            {"role": "user", "content": text},
+        ],
+        max_tokens=128,
+        temperature=0.1,
+    )
+    return resp.choices[0].message.content.strip()
+
+
+@app.post("/api/translate")
+async def api_translate(request: Request):
+    """
+    Translate an open query to English for CLIP retrieval.
+    If source_lang == 'en' or text is already cached/approved, returns immediately.
+    New translations are saved as 'pending' for admin review.
+    """
+    body = await request.json()
+    text: str = (body.get("text") or "").strip()
+    source_lang: str = (body.get("source_lang") or "en").strip()
+
+    if not text:
+        raise HTTPException(400, "text is required")
+
+    # English pass-through — no translation needed
+    if source_lang == "en":
+        return {"translation": text, "status": "passthrough"}
+
+    # Check if we already have a translation for this text+lang
+    existing = await db.get_translation(text, source_lang)
+    if existing:
+        return {
+            "translation": existing["translation"],
+            "status": existing["status"],
+        }
+
+    # Call LLM
+    translation = await _translate_with_llm(text, source_lang)
+
+    # Persist as pending (admin must approve before it appears in everyone's list)
+    record = await db.save_translation(text, source_lang, translation)
+    log.info(f"New translation [{source_lang}→en] '{text}' → '{translation}' (pending review)")
+
+    return {"translation": translation, "status": "pending"}
+
+
+# ── Translation admin endpoints ───────────────────────────────────────────
+
+@app.get("/api/admin/translations")
+async def api_admin_list_translations(request: Request, status: str = ""):
+    check_admin(request)
+    rows = await db.list_translations(status or None)
+    return {"translations": rows}
+
+
+@app.post("/api/admin/translations/{row_id}/approve")
+async def api_admin_approve_translation(row_id: int, request: Request):
+    check_admin(request)
+    body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
+    edited_text = (body.get("translation") or "").strip() or None
+    row = await db.review_translation(row_id, "approved", edited_text)
+    if row is None:
+        raise HTTPException(404, "Translation not found")
+    log.info(f"Translation {row_id} approved: '{row['translation']}'")
+    return row
+
+
+@app.post("/api/admin/translations/{row_id}/reject")
+async def api_admin_reject_translation(row_id: int, request: Request):
+    check_admin(request)
+    row = await db.review_translation(row_id, "rejected")
+    if row is None:
+        raise HTTPException(404, "Translation not found")
+    log.info(f"Translation {row_id} rejected")
+    return row
 
 
 # ── Workshop endpoints ─────────────────────────────────────────────────────

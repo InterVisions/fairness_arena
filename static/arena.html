@@ -114,6 +114,14 @@
     font-size: 0.9rem;
   }
 
+  #translation-hint {
+    font-size: 0.78rem;
+    color: #6c757d;
+    padding: 2px 4px;
+    margin-top: 2px;
+  }
+  #translation-hint .arrow { margin: 0 4px; }
+
   #query-suggestions {
     display: none;
     position: absolute;
@@ -521,6 +529,7 @@
                data-i18n="ui.query_placeholder" data-i18n-attr="placeholder"
                placeholder="Select or type a query…">
         <div id="query-suggestions"></div>
+        <div id="translation-hint" style="display:none"></div>
       </div>
       <button class="btn btn-primary" onclick="startMatch()"
               data-i18n="ui.search_btn">Search</button>
@@ -770,6 +779,7 @@ window.addEventListener('load', () => {
     S._queryKey = null;  // user is typing freely — no longer a predefined query
     activeIdx = -1;
     renderSuggestions(inp.value);
+    document.getElementById('translation-hint').style.display = 'none';
   });
   inp.addEventListener('keydown', e => {
     const items = box.querySelectorAll('.suggestion-item');
@@ -824,8 +834,29 @@ async function startMatch() {
   document.getElementById('comparison').classList.add('loading');
   document.getElementById('vote-panel').style.display = 'none';
 
-  // Use EN canonical key for predefined queries; raw input for open queries
-  const serverQuery = S._queryKey || query;
+  // Use EN canonical key for predefined queries; translate open queries if needed
+  let serverQuery = S._queryKey || query;
+  const hintEl = document.getElementById('translation-hint');
+  hintEl.style.display = 'none';
+
+  if (!S._queryKey && I18n.currentLang() !== 'en') {
+    try {
+      const tResp = await fetch('/api/translate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: query, source_lang: I18n.currentLang()}),
+      });
+      if (tResp.ok) {
+        const tData = await tResp.json();
+        if (tData.translation && tData.translation !== query) {
+          serverQuery = tData.translation;
+          hintEl.innerHTML = `<span class="arrow">→</span><em>${tData.translation}</em>`;
+          hintEl.style.display = 'block';
+        }
+      }
+    } catch (_) { /* fallback: use original text */ }
+  }
+
   const resp = await fetch(`/api/match?query=${encodeURIComponent(serverQuery)}&participant_id=${S.pid}`);
   const match = await resp.json();
   S.currentMatch = match;

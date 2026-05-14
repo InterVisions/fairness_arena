@@ -138,6 +138,17 @@
     padding: 8px 12px; border-radius: 6px;
     background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2);
   }
+  .btn-tab {
+    background: var(--bg-card); color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 12px; cursor: pointer; font-size: 0.8rem;
+  }
+  .btn-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #translations-table th { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  #translations-table td { padding: 5px 8px; border-bottom: 1px solid #2d3748; vertical-align: middle; }
+  .trans-edit { width: 100%; background: #111827; color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
+    font-family: var(--mono); font-size: 0.8rem; }
 </style>
 </head>
 <body>
@@ -262,6 +273,37 @@
     </div>
   </div>
 
+  <!-- Translation moderation -->
+  <div class="card" style="margin-top:16px">
+    <h2>Open Query Translations</h2>
+    <p style="font-size:0.82rem;color:var(--text-dim);margin:0 0 12px">
+      Translations are <strong>pending</strong> by default. Approve a translation to make
+      it appear in all participants' query list.
+    </p>
+    <div style="margin-bottom:10px;display:flex;gap:8px">
+      <button onclick="loadTranslations('pending')" id="tab-pending" class="btn-tab active">Pending</button>
+      <button onclick="loadTranslations('approved')" id="tab-approved" class="btn-tab">Approved</button>
+      <button onclick="loadTranslations('rejected')" id="tab-rejected" class="btn-tab">Rejected</button>
+      <button onclick="loadTranslations()" id="tab-all" class="btn-tab">All</button>
+    </div>
+    <div id="translations-table-wrap">
+      <table id="translations-table" style="font-size:0.82rem;width:100%">
+        <thead>
+          <tr>
+            <th style="text-align:left">Original</th>
+            <th>Lang</th>
+            <th style="text-align:left">Translation (EN)</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="translations-body">
+          <tr><td colspan="5" style="color:var(--text-dim)">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -288,7 +330,7 @@ async function adminFetch(url, opts = {}) {
 }
 
 async function refreshAll() {
-  await Promise.all([refreshStats(), loadDatasets(), loadSessions()]);
+  await Promise.all([refreshStats(), loadDatasets(), loadSessions(), loadTranslations()]);
 }
 
 // ── Session management ────────────────────────────────────────────────────
@@ -514,8 +556,66 @@ async function exportAnalysis() {
   window.open(`/api/export_analysis?token=${TOKEN}`);
 }
 
+// ── Translation moderation ────────────────────────────────────────────────
+
+let _currentTransFilter = 'pending';
+
+async function loadTranslations(status) {
+  if (status !== undefined) _currentTransFilter = status;
+
+  // Update tab active state
+  ['pending','approved','rejected','all'].forEach(s => {
+    const btn = document.getElementById(`tab-${s}`);
+    if (btn) btn.classList.toggle('active', (s === (_currentTransFilter || 'all')));
+  });
+
+  const qs = _currentTransFilter ? `?status=${_currentTransFilter}` : '';
+  const data = await adminFetch(`/api/admin/translations${qs}`);
+  const tbody = document.getElementById('translations-body');
+  if (!data || !data.translations) return;
+  if (!data.translations.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--text-dim)">No translations found.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.translations.map(t => {
+    const date = t.created_at ? new Date(t.created_at * 1000).toISOString().slice(0, 16).replace('T', ' ') : '';
+    const statusColor = t.status === 'approved' ? '#34d399' : t.status === 'rejected' ? '#f87171' : '#fbbf24';
+    const actions = t.status === 'pending'
+      ? `<button onclick="approveTranslation(${t.id})" style="margin-right:4px;background:#065f46;color:#d1fae5;border:none;border-radius:4px;padding:3px 8px;cursor:pointer">Approve</button>
+         <button onclick="rejectTranslation(${t.id})" style="background:#7f1d1d;color:#fee2e2;border:none;border-radius:4px;padding:3px 8px;cursor:pointer">Reject</button>`
+      : `<span style="font-size:0.75rem;color:var(--text-dim)">${date}</span>`;
+    return `<tr id="trans-row-${t.id}">
+      <td>${escHtml(t.original_text)}</td>
+      <td style="text-align:center">${t.source_lang}</td>
+      <td><input class="trans-edit" id="trans-edit-${t.id}" value="${escHtml(t.translation)}" ${t.status !== 'pending' ? 'disabled' : ''}></td>
+      <td style="text-align:center;color:${statusColor}">${t.status}</td>
+      <td style="white-space:nowrap">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function approveTranslation(id) {
+  const editedText = document.getElementById(`trans-edit-${id}`)?.value?.trim();
+  const body = editedText ? {translation: editedText} : {};
+  await adminFetch(`/api/admin/translations/${id}/approve`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  loadTranslations();
+}
+
+async function rejectTranslation(id) {
+  await adminFetch(`/api/admin/translations/${id}/reject`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+  loadTranslations();
+}
+
 // Auto-refresh every 10s
-setInterval(() => { if (TOKEN) Promise.all([refreshStats(), loadSessions()]); }, 10000);
+setInterval(() => { if (TOKEN) Promise.all([refreshStats(), loadSessions(), loadTranslations()]); }, 10000);
 </script>
 </body>
 </html>

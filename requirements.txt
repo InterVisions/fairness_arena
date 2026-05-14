@@ -7,4 +7,5 @@ uvicorn[standard]>=0.22
 aiosqlite>=0.19
 datasets<4.0.0
 transformers>=4.35
+openai>=1.0
 
