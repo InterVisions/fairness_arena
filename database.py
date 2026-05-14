@@ -15,35 +15,6 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "data" / "arena.db"
 
-OCCUPATION_KEYWORDS = [
-    'nurse', 'doctor', 'ceo', 'teacher', 'engineer', 'scientist',
-    'lawyer', 'manager', 'pilot', 'chef', 'programmer', 'developer',
-    'caretaker', 'activist',
-]
-TRAIT_KEYWORDS = [
-    'strong', 'intelligent', 'beautiful', 'trustworthy', 'dangerous',
-    'competent', 'aggressive', 'kind', 'criminal',
-    'attractive', 'hero', 'homeless', 'rich', 'terrorist',
-]
-ACTION_KEYWORDS = [
-    'protesting', 'leading', 'cooking', 'coding', 'teaching', 'caring',
-    'running', 'playing', 'working', 'studying',
-]
-
-
-def categorize_query(query: str) -> str:
-    q = query.lower()
-    for kw in OCCUPATION_KEYWORDS:
-        if kw in q:
-            return 'occupation'
-    for kw in TRAIT_KEYWORDS:
-        if kw in q:
-            return 'trait'
-    for kw in ACTION_KEYWORDS:
-        if kw in q:
-            return 'action'
-    return 'custom'
-
 
 async def init_db():
     """Create tables if they don't exist."""
@@ -171,14 +142,13 @@ async def get_ratings() -> dict:
 async def record_vote(vote: dict, k_factor: float = 32, initial_rating: float = 1500):
     """Record a vote and update Elo ratings."""
     async with aiosqlite.connect(DB_PATH) as db:
-        query_cat = categorize_query(vote.get("query", ""))
         # Insert vote
         await db.execute(
             """INSERT INTO votes
                (participant_id, query, model_a, model_b, winner, position_a,
                 why_tags, why_freetext, images_a, images_b, timestamp, session_meta,
-                session_id, query_category, workshop_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                session_id, workshop_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 vote["participant_id"],
                 vote["query"],
@@ -193,7 +163,6 @@ async def record_vote(vote: dict, k_factor: float = 32, initial_rating: float = 
                 time.time(),
                 json.dumps(vote.get("session_meta", {})),
                 vote.get("session_id"),
-                query_cat,
                 vote.get("workshop_id"),
             )
         )
