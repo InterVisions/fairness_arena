@@ -172,7 +172,7 @@
   <div class="actions">
     <button onclick="refreshAll()">🔄 Refresh</button>
     <button onclick="exportCSV()">📥 Export votes CSV</button>
-    <button onclick="precompute()">⚡ Pre-compute all retrievals</button>
+    <button onclick="exportAnalysis()">📊 Export analysis CSV</button>
     <button class="danger" onclick="resetElo()">🗑️ Reset Elo ratings</button>
   </div>
 
@@ -510,9 +510,8 @@ async function resetElo() {
   refreshStats();
 }
 
-async function precompute() {
-  const data = await adminFetch('/api/admin/precompute', {method: 'POST'});
-  if (data) alert(`Pre-computed ${data.newly_computed} new (model, query) pairs`);
+async function exportAnalysis() {
+  window.open(`/api/export_analysis?token=${TOKEN}`);
 }
 
 // Auto-refresh every 10s
