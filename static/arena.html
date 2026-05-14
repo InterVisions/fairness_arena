@@ -214,6 +214,13 @@
   .label-a { background: #dbeafe; color: #1d4ed8; }
   .label-b { background: #fce7f3; color: #be185d; }
 
+  .debug-model-name {
+    display: none;
+    font-size: 0.7rem; color: #6b7280; font-family: var(--mono);
+    margin-top: 3px; word-break: break-all;
+  }
+  .debug-mode .debug-model-name { display: block; }
+
   .image-grid {
     display: grid;
     gap: 7px;
@@ -508,6 +515,7 @@
     <div class="model-panel" id="panel-left" onclick="selectPanel('left')">
       <div class="model-header">
         <span class="model-label label-a" id="label-left"></span>
+        <div class="debug-model-name" id="debug-name-left"></div>
       </div>
       <div class="image-grid" id="grid-left"></div>
     </div>
@@ -515,6 +523,7 @@
     <div class="model-panel" id="panel-right" onclick="selectPanel('right')">
       <div class="model-header">
         <span class="model-label label-b" id="label-right"></span>
+        <div class="debug-model-name" id="debug-name-right"></div>
       </div>
       <div class="image-grid" id="grid-right"></div>
     </div>
@@ -567,6 +576,10 @@ const S = {
 //  Init
 // ═══════════════════════════════════════════════════════════════════════
 async function init() {
+  // Activate debug mode via ?debug=1
+  if (new URLSearchParams(window.location.search).get('debug') === '1')
+    document.body.classList.add('debug-mode');
+
   // Load config
   const resp = await fetch('/api/config');
   S.config = await resp.json();
@@ -763,6 +776,12 @@ async function startMatch() {
   const leftIsA = match.left.label === 'Model A';
   document.getElementById('label-left').className = 'model-label ' + (leftIsA ? 'label-a' : 'label-b');
   document.getElementById('label-right').className = 'model-label ' + (leftIsA ? 'label-b' : 'label-a');
+
+  // Debug: show actual model IDs
+  const leftModel  = leftIsA ? match.model_a : match.model_b;
+  const rightModel = leftIsA ? match.model_b : match.model_a;
+  document.getElementById('debug-name-left').textContent  = leftModel;
+  document.getElementById('debug-name-right').textContent = rightModel;
   document.getElementById('panel-left').className = 'model-panel ' + (leftIsA ? 'panel-a' : 'panel-b');
   document.getElementById('panel-right').className = 'model-panel ' + (leftIsA ? 'panel-b' : 'panel-a');
 
