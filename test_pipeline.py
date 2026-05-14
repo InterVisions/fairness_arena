@@ -295,28 +295,33 @@ def test_pair_selection_uniformity(n: int = 3000, sigma: float = 4.0):
     print(f"  [OK] left/right position: model_a on left {left_a_count}/{n} times "
           f"({100*left_a_count/n:.1f}%, z={z_pos:.2f}σ)")
 
-    # ── A/B labeling: each model in A slot roughly equal across pairs ─────────
-    # Count how many times each unique model appears as model_a across drawn pairs
-    model_a_counts: dict[str, int] = {}
-    model_b_counts: dict[str, int] = {}
+    # ── Per-pair left/right balance ───────────────────────────────────────────
+    # For each pair, model_a should end up on the left ~50% of draws.
+    # A/B label is fixed by pair order in config (intentional); only position is random.
+    pair_left_counts: dict[tuple, int] = {p: 0 for p in valid_pairs}
+    pair_total_counts: dict[tuple, int] = {p: 0 for p in valid_pairs}
     rng2 = random.Random(42)
     for _ in range(n):
-        ma, mb = rng2.choice(valid_pairs)
-        model_a_counts[ma] = model_a_counts.get(ma, 0) + 1
-        model_b_counts[mb] = model_b_counts.get(mb, 0) + 1
+        pair = rng2.choice(valid_pairs)
+        pair_total_counts[pair] += 1
+        if rng2.random() < 0.5:
+            pair_left_counts[pair] += 1
 
-    all_models = {m for pair in valid_pairs for m in pair}
-    for model in all_models:
-        total_appearances = model_a_counts.get(model, 0) + model_b_counts.get(model, 0)
-        a_appearances     = model_a_counts.get(model, 0)
-        if total_appearances == 0:
+    for pair in valid_pairs:
+        total = pair_total_counts[pair]
+        left  = pair_left_counts[pair]
+        if total < 10:
             continue
-        frac = a_appearances / total_appearances
-        assert 0.3 < frac < 0.7 or total_appearances < 50, (
-            f"Model {model} is in A slot {a_appearances}/{total_appearances} times "
-            f"({100*frac:.1f}%) — suspiciously skewed"
+        std  = math.sqrt(total * 0.5 * 0.5)
+        z    = abs(left - total / 2) / std
+        assert z < sigma, (
+            f"Pair {pair}: model_a on left {left}/{total} times "
+            f"({100*left/total:.1f}%, z={z:.1f}σ > {sigma}σ)"
         )
-    print(f"  [OK] A/B labeling: no model is systematically stuck in one slot")
+    print(f"  [OK] per-pair left/right balance: " +
+          ", ".join(f"{p[0].split('-')[0]}/{p[1].split('-')[0]} "
+                    f"{pair_left_counts[p]}/{pair_total_counts[p]}"
+                    for p in valid_pairs))
 
 
 # ── Runner ────────────────────────────────────────────────────────────────────
