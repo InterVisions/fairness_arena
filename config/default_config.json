@@ -38,7 +38,7 @@
     },
     {
       "id": "clip-vit-b16-debiased",
-      "name": "CLIP ViT-B/16 + Neural Interventions",
+      "name": "CLIP ViT-B/16 Debiased",
       "backend": "precomputed",
       "embeddings_file": "embeddings_CFD_debiased.pkl",
       "text_encoder_model": "ViT-B-16",
