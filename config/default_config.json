@@ -3,7 +3,7 @@
     "elo_k_factor": 32,
     "elo_initial_rating": 1500,
     "images_per_model": 12,
-    "max_scroll_images": 50,
+    "max_scroll_images": 500,
     "grid_columns": 4,
     "allow_open_queries": false,
     "active_dataset_id": "cfd",
