@@ -6,7 +6,7 @@
     "max_scroll_images": 50,
     "grid_columns": 4,
     "allow_open_queries": false,
-    "active_dataset_id": "flickr30k",
+    "active_dataset_id": "cfd",
     "judge_question": "",
     "search_query_label": "",
     "show_only_relevant": false,
@@ -20,65 +20,49 @@
       "More natural / realistic",
       "Better overall representation"
     ],
-    "matchmaking": "uniform",
-    "allowed_pairs": []
+    "matchmaking": "allowed_pairs",
+    "allowed_pairs": [
+      ["clip-vit-b16", "clip-vit-b16-debiased"],
+      ["siglip-b16",   "siglip2-b16"],
+      ["clip-vit-b16", "siglip-b16"]
+    ]
   },
   "models": [
     {
-      "id": "openai-vitb32",
-      "name": "OpenAI ViT-B/32",
-      "backend": "open_clip",
-      "model_name": "ViT-B-32",
-      "pretrained": "openai",
-      "enabled": true
-    },
-    {
-      "id": "openai-vitb16",
-      "name": "OpenAI ViT-B/16",
+      "id": "clip-vit-b16",
+      "name": "OpenAI CLIP ViT-B/16",
       "backend": "open_clip",
       "model_name": "ViT-B-16",
       "pretrained": "openai",
       "enabled": true
     },
     {
-      "id": "openai-vitl14",
-      "name": "OpenAI ViT-L/14",
-      "backend": "open_clip",
-      "model_name": "ViT-L-14",
-      "pretrained": "openai",
+      "id": "clip-vit-b16-debiased",
+      "name": "CLIP ViT-B/16 + Neural Interventions",
+      "backend": "precomputed",
+      "embeddings_file": "embeddings_CFD_debiased.pkl",
+      "text_encoder_model": "ViT-B-16",
+      "text_encoder_pretrained": "openai",
       "enabled": true
     },
     {
-      "id": "laion-vitb32",
-      "name": "LAION ViT-B/32",
+      "id": "siglip-b16",
+      "name": "SigLIP ViT-B/16",
       "backend": "open_clip",
-      "model_name": "ViT-B-32",
-      "pretrained": "laion2b_s34b_b79k",
+      "model_name": "ViT-B-16-SigLIP",
+      "pretrained": "webli",
+      "enabled": true
+    },
+    {
+      "id": "siglip2-b16",
+      "name": "SigLIP2 ViT-B/16",
+      "backend": "open_clip",
+      "model_name": "ViT-B-16-SigLIP2",
+      "pretrained": "webli",
       "enabled": true
     }
   ],
   "datasets": [
-    {
-      "id": "flickr30k",
-      "name": "Flickr 30K",
-      "source": "huggingface",
-      "hf_repo": "nlphuji/flickr30k",
-      "hf_split": "test",
-      "image_column": "image",
-      "caption_column": null,
-      "relevance_column": null,
-      "max_images": 1000
-    },
-    {
-      "id": "fairface",
-      "name": "FairFace",
-      "source": "huggingface",
-      "hf_repo": "HuggingFaceM4/FairFace",
-      "hf_config": "0.25",
-      "hf_split": "validation",
-      "image_column": "image",
-      "max_images": null
-    },
     {
       "id": "cfd",
       "name": "Chicago Face Database",
