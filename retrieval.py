@@ -49,6 +49,11 @@ class RetrievalEngine:
             return
 
         backend = model_config.get("backend", "open_clip")
+
+        if backend == "precomputed":
+            log.info(f"Model {mid} uses precomputed embeddings — skipping live load")
+            return
+
         model_name = model_config["model_name"]
         pretrained = model_config.get("pretrained", "openai")
 
