@@ -22,6 +22,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 import database as db
@@ -40,6 +41,14 @@ BUNDLES_DIR = None        # Directory containing per-dataset bundles
 ACTIVE_SESSION = None     # Currently running session (dict or None)
 
 app = FastAPI(title="Fairness Arena")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://representacion.intervisions.eu"],  # or ["*"] for testing
+    allow_credentials=True,
+    allow_methods=["*"],   # this is what fixes the OPTIONS 405
+    allow_headers=["*"],
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
