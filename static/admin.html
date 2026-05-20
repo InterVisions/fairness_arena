@@ -185,6 +185,7 @@
     <button onclick="exportCSV()">📥 Export votes CSV</button>
     <button onclick="exportAnalysis()">📊 Export analysis CSV</button>
     <button class="danger" onclick="resetElo()">🗑️ Reset Elo ratings</button>
+    <button class="danger" onclick="resetOpenQueries()">🔄 Reset open queries</button>
   </div>
 
   <!-- Session management -->
@@ -550,6 +551,15 @@ async function resetElo() {
   if (!confirm('Reset ALL Elo ratings? This cannot be undone.')) return;
   await adminFetch('/api/admin/reset_elo', {method: 'POST'});
   refreshStats();
+}
+
+async function resetOpenQueries() {
+  if (!confirm('Reset open query pool? Queries submitted before now will no longer appear for new users. All data is preserved.')) return;
+  const data = await adminFetch('/api/admin/reset_open_queries', {method: 'POST'});
+  if (data) {
+    const d = new Date(data.reset_at * 1000);
+    alert(`Open query pool reset. New epoch started at ${d.toUTCString()}.`);
+  }
 }
 
 async function exportAnalysis() {

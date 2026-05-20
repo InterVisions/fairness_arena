@@ -325,12 +325,18 @@ async def cache_retrieval(model_id: str, query: str, indices: list, similarities
         await db.commit()
 
 
-async def get_cached_query_list() -> list[str]:
+async def get_cached_query_list(since: float | None = None) -> list[str]:
     """Return distinct queries accumulated in the retrieval cache (open queries)."""
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT DISTINCT query FROM retrieval_cache ORDER BY computed_at ASC"
-        )
+        if since is not None:
+            cursor = await db.execute(
+                "SELECT DISTINCT query FROM retrieval_cache WHERE computed_at > ? ORDER BY computed_at ASC",
+                (since,)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT DISTINCT query FROM retrieval_cache ORDER BY computed_at ASC"
+            )
         return [row[0] for row in await cursor.fetchall()]
 
 
@@ -559,24 +565,36 @@ async def review_translation(row_id: int, status: str, translation: str | None =
         return dict(row) if row else None
 
 
-async def get_approved_translations() -> list[str]:
+async def get_approved_translations(since: float | None = None) -> list[str]:
     """Return distinct English canonicals of all approved open queries."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute(
-            "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved' ORDER BY created_at"
-        )
+        if since is not None:
+            cur = await db.execute(
+                "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved' AND created_at > ? ORDER BY created_at",
+                (since,)
+            )
+        else:
+            cur = await db.execute(
+                "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved' ORDER BY created_at"
+            )
         rows = await cur.fetchall()
         return [r["translation"] for r in rows]
 
 
-async def get_pending_translation_texts() -> set[str]:
+async def get_pending_translation_texts(since: float | None = None) -> set[str]:
     """Return EN translations that have at least one non-approved (pending/rejected) record.
     Used to suppress them from the shared query list until approved."""
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute(
-            "SELECT DISTINCT translation FROM open_query_translations WHERE status != 'approved'"
-        )
+        if since is not None:
+            cur = await db.execute(
+                "SELECT DISTINCT translation FROM open_query_translations WHERE status != 'approved' AND created_at > ?",
+                (since,)
+            )
+        else:
+            cur = await db.execute(
+                "SELECT DISTINCT translation FROM open_query_translations WHERE status != 'approved'"
+            )
         rows = await cur.fetchall()
         return {r[0] for r in rows}
 
@@ -593,7 +611,7 @@ async def get_translation_by_en_lang(en_text: str, lang: str) -> dict | None:
         return dict(row) if row else None
 
 
-async def get_multilingual_labels() -> dict[str, dict[str, str]]:
+async def get_multilingual_labels(since: float | None = None) -> dict[str, dict[str, str]]:
     """Return {en_canonical: {lang: display_text}} for all approved open queries.
 
     Collects every record whose EN canonical has at least one approved entry, so that
@@ -601,9 +619,15 @@ async def get_multilingual_labels() -> dict[str, dict[str, str]]:
     """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute(
-            "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved'"
-        )
+        if since is not None:
+            cur = await db.execute(
+                "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved' AND created_at > ?",
+                (since,)
+            )
+        else:
+            cur = await db.execute(
+                "SELECT DISTINCT translation FROM open_query_translations WHERE status='approved'"
+            )
         approved_en = [r["translation"] for r in await cur.fetchall()]
         if not approved_en:
             return {}

@@ -138,20 +138,21 @@ async def api_config():
     queries = ENGINE.bundle_queries()
     open_query_labels: dict = {}
     if arena.get("allow_open_queries", False):
+        since = arena.get("open_queries_reset_at")
         # Direct English open queries — but exclude any that are pending/rejected translations
         # (those must go through admin approval before appearing for other participants)
-        cached_queries = await db.get_cached_query_list()
-        pending_en = await db.get_pending_translation_texts()
+        cached_queries = await db.get_cached_query_list(since=since)
+        pending_en = await db.get_pending_translation_texts(since=since)
         for q in cached_queries:
             if q not in queries and q not in pending_en:
                 queries.append(q)
         # Approved translated queries
-        approved_en = await db.get_approved_translations()
+        approved_en = await db.get_approved_translations(since=since)
         for q in approved_en:
             if q not in queries:
                 queries.append(q)
         # Multilingual display labels so the UI can show ES/CA text for open queries
-        open_query_labels = await db.get_multilingual_labels()
+        open_query_labels = await db.get_multilingual_labels(since=since)
     return {
         "predefined_queries": queries,
         "open_query_labels": open_query_labels,
@@ -370,6 +371,21 @@ async def api_admin_reset_elo(request: Request):
     initial = CONFIG["arena"].get("elo_initial_rating", 1500)
     await db.reset_elo(initial)
     return {"status": "ok", "message": f"All Elo ratings reset to {initial}"}
+
+
+@app.post("/api/admin/reset_open_queries")
+async def api_admin_reset_open_queries(request: Request):
+    """Mark current time as the open-query epoch start.
+    Queries submitted before this timestamp are no longer shown to new users;
+    all data is preserved in the database."""
+    check_admin(request)
+    now = time.time()
+    CONFIG.setdefault("arena", {})["open_queries_reset_at"] = now
+    config_path = Path(__file__).parent / "config" / "active_config.json"
+    with open(config_path, "w") as f:
+        json.dump(CONFIG, f, indent=2)
+    log.info(f"Open queries reset: new epoch starts at {now}")
+    return {"status": "ok", "reset_at": now}
 
 
 @app.get("/api/admin/export_csv")
